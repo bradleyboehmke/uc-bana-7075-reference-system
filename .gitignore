@@ -1,0 +1,82 @@
+# Python virtual environment
+venv/
+.venv/
+env/
+env_local/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb_checkpoints/
+
+# CatBoost training artifacts
+catboost_info/
+**/catboost_info/
+
+# Environment variables
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+
+# Data versioning strategy:
+# - Raw data: kept in Git for accessibility (small enough)
+# - Processed data & features: excluded from Git, tracked by DVC
+/data/processed/*.parquet
+/data/processed/*.csv
+
+# Model artifacts (optional - can be large)
+# models/**/*.pkl
+# models/**/*.joblib
+# models/**/*.h5
+
+# Output files (all experiments tracked in MLflow)
+outputs/
+
+# DVC
+.dvc/cache
+.dvc/tmp
+.dvc/config.local
+
+# Great Expectations
+great_expectations/uncommitted/
+great_expectations/.ge_store_backend_id
+
+# MLflow
+mlruns/
+mlartifacts/
+
+# Monitoring
+monitoring/drift_reports/
+monitoring/performance_reports/
+data/monitoring/predictions.db
+
+# Test coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Docker
+*.log
+
+# MkDocs
+site/
+
+# Specification documents (keep local, don't track)
+spec-rossmann-forecasting.md
+spec-rossmann-mlops.md
+uv.lock
