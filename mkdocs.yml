@@ -96,7 +96,6 @@ nav:
       - Experiment Tracking: modelops/tracking.md
       - Model Training: modelops/training.md
       - Model Registry: modelops/registry.md
-      - Hyperparameter Tuning: modelops/tuning.md
   - Deployment:
       - Overview: deployment/overview.md
       - FastAPI Service: deployment/fastapi.md

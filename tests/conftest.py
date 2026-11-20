@@ -1,10 +1,14 @@
 """Pytest configuration and shared fixtures."""
 
+import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pytest
+
+# Make src/ importable the way the pipeline modules import each other
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 
 @pytest.fixture
@@ -74,24 +78,13 @@ def sample_store_data():
 
 @pytest.fixture
 def sample_features_data(sample_train_data, sample_store_data):
-    """Create sample feature-engineered data.
+    """Sample data run through the real cleaning and feature pipeline."""
+    from data.make_dataset import basic_cleaning, merge_store_info
+    from features.build_features import build_all_features
 
-    Merges train and store data with basic features.
-    """
-    # Parse dates first
-    df = sample_train_data.copy()
-    df["Date"] = pd.to_datetime(df["Date"])
-
-    # Merge with store data
-    df = df.merge(sample_store_data, on="Store", how="left")
-
-    # Add calendar features
-    df["Year"] = df["Date"].dt.year
-    df["Month"] = df["Date"].dt.month
-    df["Week"] = df["Date"].dt.isocalendar().week
-    df["Day"] = df["Date"].dt.day
-
-    return df
+    return build_all_features(
+        basic_cleaning(merge_store_info(sample_train_data, sample_store_data))
+    )
 
 
 @pytest.fixture
@@ -100,48 +93,6 @@ def temp_output_dir(tmp_path):
     output_dir = tmp_path / "outputs"
     output_dir.mkdir()
     return output_dir
-
-
-@pytest.fixture
-def sample_hyperparameters():
-    """Sample hyperparameters for ensemble models.
-
-    Returns
-    -------
-    dict
-        Hyperparameters for LightGBM, XGBoost, and CatBoost
-    """
-    return {
-        "lightgbm": {
-            "num_leaves": 31,
-            "learning_rate": 0.05,
-            "feature_fraction": 0.8,
-            "bagging_fraction": 0.7,
-            "bagging_freq": 5,
-            "max_depth": 6,
-            "min_child_samples": 20,
-            "reg_alpha": 0.1,
-            "reg_lambda": 0.1,
-        },
-        "xgboost": {
-            "max_depth": 6,
-            "learning_rate": 0.05,
-            "subsample": 0.8,
-            "colsample_bytree": 0.8,
-            "min_child_weight": 5,
-            "reg_alpha": 0.1,
-            "reg_lambda": 0.1,
-            "gamma": 0.01,
-        },
-        "catboost": {
-            "depth": 6,
-            "learning_rate": 0.05,
-            "l2_leaf_reg": 3.0,
-            "random_strength": 1.0,
-            "bagging_temperature": 0.5,
-            "border_count": 128,
-        },
-    }
 
 
 @pytest.fixture
@@ -156,10 +107,10 @@ def mock_model_version():
     from unittest.mock import Mock
 
     mv = Mock()
-    mv.name = "rossmann-ensemble"
+    mv.name = "rossmann-model"
     mv.version = "1"
     mv.current_stage = "Production"
-    mv.description = "Test ensemble model"
+    mv.description = "Test LightGBM model"
     mv.run_id = "test-run-id-123"
     mv.status = "READY"
     mv.creation_timestamp = 1609459200000  # 2021-01-01
@@ -179,8 +130,8 @@ def mock_registered_model():
     from unittest.mock import Mock
 
     rm = Mock()
-    rm.name = "rossmann-ensemble"
-    rm.description = "Ensemble model for Rossmann sales forecasting"
+    rm.name = "rossmann-model"
+    rm.description = "LightGBM model for Rossmann sales forecasting"
     rm.creation_timestamp = 1609459200000
     rm.last_updated_timestamp = 1609459200000
     return rm

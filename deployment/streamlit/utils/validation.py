@@ -5,12 +5,21 @@ to the API.
 """
 
 from datetime import datetime
+from pathlib import Path
 
 import pandas as pd
 
+# The stores this system has data for (and the only ones the model knows)
+STORE_PATH = Path(__file__).resolve().parents[3] / "data" / "raw" / "store.csv"
+
+
+def get_known_stores() -> list[int]:
+    """Return the sorted store IDs listed in data/raw/store.csv."""
+    return sorted(int(s) for s in pd.read_csv(STORE_PATH, usecols=["Store"])["Store"])
+
 
 def validate_store_id(store: int) -> tuple[bool, str]:
-    """Validate store ID is within valid range.
+    """Validate that the store ID is one of the stores in data/raw/store.csv.
 
     Parameters
     ----------
@@ -25,8 +34,12 @@ def validate_store_id(store: int) -> tuple[bool, str]:
     if not isinstance(store, int):
         return False, "Store ID must be an integer"
 
-    if store < 1 or store > 1115:
-        return False, "Store ID must be between 1 and 1115"
+    known_stores = get_known_stores()
+    if store not in known_stores:
+        return (
+            False,
+            f"Store {store} is not one of the {len(known_stores)} stores in this system",
+        )
 
     return True, ""
 
@@ -217,8 +230,9 @@ def validate_batch_csv(df: pd.DataFrame) -> tuple[bool, list[str]]:
         return False, errors
 
     # Validate Store IDs
-    if not df["Store"].between(1, 1115).all():
-        errors.append("Store IDs must be between 1 and 1115")
+    unknown = sorted(set(df["Store"].astype(int)) - set(get_known_stores()))
+    if unknown:
+        errors.append(f"Unknown store IDs (not in data/raw/store.csv): {unknown}")
 
     # Validate Date format - try multiple common formats
     try:
@@ -286,7 +300,7 @@ def get_csv_template() -> pd.DataFrame:
         Template DataFrame with sample data (DayOfWeek auto-calculated from Date)
     """
     template_data = {
-        "Store": [1, 2, 3, 4, 5],
+        "Store": get_known_stores()[:5],
         "Date": [
             "2015-08-01",
             "2015-08-02",

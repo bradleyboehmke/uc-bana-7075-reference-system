@@ -5,69 +5,51 @@ data:
   processed_path: data/processed
 
 features:
-  lags: [1, 7, 14, 28]
-  rolling_windows: [7, 14, 28, 60]
-  include_promo_features: true
-  include_competition_features: true
+  # The features the model uses. This list is the single source of truth:
+  # training, validation, the API, and batch prediction all read it.
+  model_features:
+    # When: calendar patterns
+    - DayOfWeek
+    - Month
+    - Week
+    - Year
+    # Store: what kind of store it is and who it competes with
+    - StoreType
+    - Assortment
+    - CompetitionDistance
+    # Promotions
+    - Promo
+    - Promo2
+    - Promo2Active
+    # Holidays
+    - StateHoliday
+    - SchoolHoliday
+  categorical_features:
+    - StoreType
+    - Assortment
+    - StateHoliday
 
-cv:
-  method: expanding
-  n_folds: 5            # Number of CV folds
-  fold_length_days: 42  # 6 weeks
-  min_train_days: 365   # 1 year minimum
+training:
+  holdout_days: 42  # Last 6 weeks are held out for evaluation
 
-models:
-  baseline_lightgbm: {}
-
-  advanced_lightgbm:
+model:
+  # One LightGBM model with fixed hyperparameters (no tuning).
+  lightgbm:
     objective: regression
-    metric: rmse
-    boosting_type: gbdt
-    num_leaves: 50
-    learning_rate: 0.03
-    feature_fraction: 0.8
-    bagging_fraction: 0.7
-    bagging_freq: 5
-    max_depth: 8
-    min_child_samples: 20
-    reg_alpha: 0.1
-    reg_lambda: 0.1
-    num_boost_round: 2000
-    early_stopping_rounds: 100
+    num_leaves: 31
+    learning_rate: 0.05
+    num_boost_round: 500
+    seed: 7075
+    num_threads: 2  # Free Colab has 2 CPUs; a fixed count also keeps results reproducible
+    verbose: -1
 
-  advanced_xgboost:
-    objective: reg:squarederror
-    eval_metric: rmse
-    max_depth: 8
-    learning_rate: 0.03
-    subsample: 0.7
-    colsample_bytree: 0.8
-    min_child_weight: 3
-    reg_alpha: 0.1
-    reg_lambda: 1.0
-    num_boost_round: 2000
-    early_stopping_rounds: 100
-
-  advanced_catboost:
-    loss_function: RMSE
-    eval_metric: RMSE
-    depth: 8
-    learning_rate: 0.03
-    l2_leaf_reg: 3
-    random_strength: 0.5
-    bagging_temperature: 0.2
-    border_count: 128
-    iterations: 2000
-    early_stopping_rounds: 100
-
-ensemble:
-  method: weighted  # 'weighted' or 'stacked'
-  meta_model: ridge  # 'ridge' or 'lightgbm' (for stacked)
-  optimize_weights: true
+validation:
+  max_rmspe: 0.20  # Maximum holdout RMSPE for promotion (the current model scores about 0.16)
 
 mlflow:
   tracking_uri: ./mlruns
   experiment_name: rossmann-forecasting
+  model_name: rossmann-model
   artifact_location: ./mlartifacts
   default_artifact_root: ./mlartifacts
   backend_store_uri: ./mlruns

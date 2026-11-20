@@ -5,9 +5,11 @@ registration, promotion, and loading models.
 """
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 import mlflow
+import mlflow.pyfunc
+from mlflow.lightgbm import log_model as log_lightgbm_model
 from mlflow.tracking import MlflowClient
 
 logger = logging.getLogger(__name__)
@@ -24,33 +26,21 @@ def get_mlflow_client() -> MlflowClient:
     return MlflowClient()
 
 
-def register_ensemble_model(
-    ensemble_model,
+def register_model(
+    model,
     model_name: str,
-    run_id: Optional[str] = None,
-    conda_env: Optional[dict[str, Any]] = None,
-    signature=None,
-    input_example=None,
-    description: Optional[str] = None,
+    description: str | None = None,
 ) -> str:
-    """Register an ensemble model to MLflow Model Registry.
+    """Log a trained LightGBM model to the active MLflow run and register it.
 
     Parameters
     ----------
-    ensemble_model : RossmannEnsemble
-        Trained ensemble model instance
+    model : lightgbm.Booster
+        Trained model
     model_name : str
-        Name for the registered model (e.g., 'rossmann-ensemble')
-    run_id : str, optional
-        MLflow run ID. If None, uses active run
-    conda_env : dict, optional
-        Conda environment specification
-    signature : mlflow.models.ModelSignature, optional
-        Model signature
-    input_example : pd.DataFrame, optional
-        Example input for model testing
+        Name for the registered model (e.g., 'rossmann-model')
     description : str, optional
-        Model description
+        Description for the new model version
 
     Returns
     -------
@@ -59,32 +49,17 @@ def register_ensemble_model(
 
     Examples
     --------
-    >>> from models.ensemble import create_ensemble
-    >>> ensemble = create_ensemble(lgb_model, xgb_model, cb_model)
-    >>> version = register_ensemble_model(
-    ...     ensemble_model=ensemble,
-    ...     model_name='rossmann-ensemble',
-    ...     signature=signature,
-    ...     input_example=X_sample
-    ... )
-    >>> print(f"Registered model version: {version}")
+    >>> with mlflow.start_run():
+    ...     version = register_model(model, model_name='rossmann-model')
     """
-    logger.info(f"Registering ensemble model: {model_name}")
-
-    # Log the model
-    model_info = mlflow.pyfunc.log_model(
-        artifact_path="ensemble_model",
-        python_model=ensemble_model,
+    logger.info(f"Registering model: {model_name}")
+    model_info = log_lightgbm_model(
+        model,
+        name="model",
         registered_model_name=model_name,
-        conda_env=conda_env,
-        signature=signature,
-        input_example=input_example,
     )
+    version = str(model_info.registered_model_version)
 
-    # Get version from model info
-    version = model_info.registered_model_version
-
-    # Update description if provided
     if description:
         client = get_mlflow_client()
         client.update_model_version(name=model_name, version=version, description=description)
@@ -115,9 +90,9 @@ def promote_model(
     Examples
     --------
     >>> # Promote to Staging
-    >>> promote_model('rossmann-ensemble', version='1', stage='Staging')
+    >>> promote_model('rossmann-model', version='1', stage='Staging')
     >>> # Promote to Production
-    >>> promote_model('rossmann-ensemble', version='2', stage='Production')
+    >>> promote_model('rossmann-model', version='2', stage='Production')
     """
     client = get_mlflow_client()
 
@@ -136,7 +111,7 @@ def promote_model(
     logger.info(f"✓ {model_name} version {version} is now in {stage}")
 
 
-def get_model_version(model_name: str, stage: str = "Production") -> Optional[str]:
+def get_model_version(model_name: str, stage: str = "Production") -> str | None:
     """Get the version number of a model in a specific stage.
 
     Parameters
@@ -153,7 +128,7 @@ def get_model_version(model_name: str, stage: str = "Production") -> Optional[st
 
     Examples
     --------
-    >>> version = get_model_version('rossmann-ensemble', stage='Production')
+    >>> version = get_model_version('rossmann-model', stage='Production')
     >>> print(f"Production version: {version}")
     """
     client = get_mlflow_client()
@@ -186,11 +161,11 @@ def load_model(model_name: str, stage: str = "Production"):
     Examples
     --------
     >>> # Load production model
-    >>> model = load_model('rossmann-ensemble', stage='Production')
+    >>> model = load_model('rossmann-model', stage='Production')
     >>> predictions = model.predict(X_test)
     >>>
     >>> # Load specific version
-    >>> model = load_model('rossmann-ensemble', stage='1')
+    >>> model = load_model('rossmann-model', stage='1')
     >>> predictions = model.predict(X_test)
     """
     if stage in ["Staging", "Production", "Archived"]:
@@ -206,7 +181,7 @@ def load_model(model_name: str, stage: str = "Production"):
     return model
 
 
-def get_model_info(model_name: str, version: Optional[str] = None) -> dict[str, Any]:
+def get_model_info(model_name: str, version: str | None = None) -> dict[str, Any]:
     """Get detailed information about a registered model.
 
     Parameters
@@ -223,7 +198,7 @@ def get_model_info(model_name: str, version: Optional[str] = None) -> dict[str, 
 
     Examples
     --------
-    >>> info = get_model_info('rossmann-ensemble', version='1')
+    >>> info = get_model_info('rossmann-model', version='1')
     >>> print(f"Model stage: {info['current_stage']}")
     >>> print(f"Run ID: {info['run_id']}")
     """

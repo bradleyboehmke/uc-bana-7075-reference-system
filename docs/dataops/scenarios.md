@@ -31,11 +31,10 @@ bash scripts/dataops_workflow.sh
 ### Train Initial Model
 
 ```bash
-# Train baseline and advanced models
-python -m src.models.train_baselines
-python -m src.models.train_advanced
+# Train and register the model
+python -m src.models.train
 
-# Model achieves RMSPE = 0.098 on validation
+# Model achieves RMSPE = 0.16 on the holdout
 # Deploy to production
 ```
 
@@ -59,7 +58,7 @@ bash scripts/dataops_workflow.sh
 
 1. **Validates new data** - Catches any schema changes
 1. **Merges with historical data** - Combines with existing records
-1. **Re-engineers all features** - Includes new lags/rolling stats
+1. **Re-engineers all features** - Builds features for the new rows
 1. **Versions new dataset** - Creates new DVC snapshot
 1. **Triggers model retraining** - Signals ModelOps workflow
 
@@ -67,10 +66,10 @@ bash scripts/dataops_workflow.sh
 
 ```bash
 # Automatic trigger (via Airflow/GitHub Actions)
-python -m src.models.train_advanced
+python -m src.models.train
 
 # New model trained on expanded dataset
-# Achieves RMSPE = 0.097 (improvement!)
+# Achieves RMSPE = 0.15 (improvement!)
 # Automatically deployed to production
 ```
 
@@ -265,9 +264,9 @@ git checkout e4f5g6h data/processed/train_features.parquet.dvc
 dvc checkout
 
 # Retrain model on previous data
-python -m src.models.train_advanced
+python -m src.models.train
 
-# Model performance restored: RMSPE = 0.097 ✅
+# Model performance restored: RMSPE = 0.16 ✅
 ```
 
 **Next Steps:**

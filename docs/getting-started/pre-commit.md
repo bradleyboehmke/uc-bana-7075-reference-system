@@ -151,13 +151,13 @@ git commit -m "chore: apply pre-commit auto-fixes"
 
 ```bash
 # 1. Make changes
-vim src/models/train_advanced.py
+vim src/models/train.py
 
 # 2. Stage changes
-git add src/models/train_advanced.py
+git add src/models/train.py
 
 # 3. Commit (hooks run automatically)
-git commit -m "feat: add Optuna hyperparameter tuning"
+git commit -m "feat: log training time to MLflow"
 
 # If hooks fail:
 # - Review the error messages

@@ -43,7 +43,7 @@ pytest tests/test_features.py
 ### Run specific test
 
 ```bash
-pytest tests/test_features.py::test_lag_features_no_leakage
+pytest tests/test_features.py::TestModelFeatureList::test_no_sales_history_features
 ```
 
 ### Run only unit tests

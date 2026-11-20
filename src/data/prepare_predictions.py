@@ -7,127 +7,134 @@ the complete data processing pipeline:
 3. Engineer features
 4. Extract model-ready features
 
-This ensures consistency between training and inference data processing.
+This ensures consistency between training and inference data processing: the API
+builds features with the same functions training uses.
 """
 
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Union
 
 import pandas as pd
 
 # Add parent directory to path for imports
 sys.path.append(str(Path(__file__).parent.parent))
 
-from features.build_features import build_all_features
-from utils.io import read_csv
-from utils.log import get_logger
-
 from data.make_dataset import basic_cleaning, merge_store_info
+from features.build_features import build_all_features, get_categorical_features, get_model_features
+from utils.io import PROJECT_ROOT, read_csv
+from utils.log import get_logger
 
 logger = get_logger(__name__)
 
-# Model feature columns (excluding metadata and target columns)
-# These columns are excluded during training (see train_ensemble.py:111)
-EXCLUDED_COLUMNS = ["Sales", "Date", "Store", "Customers"]
+STORE_PATH = PROJECT_ROOT / "data" / "raw" / "store.csv"
 
 
-def prepare_prediction_data(
+def get_known_stores(store_metadata: pd.DataFrame | None = None) -> set[int]:
+    """Return the store IDs the system has data for (the stores in store.csv).
+
+    The model only knows these stores, so requests for any other store ID are rejected.
+
+    Parameters
+    ----------
+    store_metadata : pd.DataFrame, optional
+        Store metadata. If None, loaded from data/raw/store.csv
+
+    Returns
+    -------
+    set of int
+        Known store IDs
+    """
+    if store_metadata is None:
+        store_metadata = read_csv(STORE_PATH)
+    return set(store_metadata["Store"].astype(int))
+
+
+def build_prediction_features(
     raw_data: pd.DataFrame,
-    store_metadata: Optional[pd.DataFrame] = None,
-    store_path: str = "data/raw/store.csv",
+    store_metadata: pd.DataFrame | None = None,
+    store_path: Union[str, Path] = STORE_PATH,
 ) -> pd.DataFrame:
-    """Prepare raw data for model predictions through complete pipeline.
-
-    This function mimics the production batch prediction workflow:
-    1. Merges with store metadata
-    2. Cleans the data
-    3. Engineers features
-    4. Returns model-ready features
+    """Run raw request rows through the same cleaning and feature steps as training.
 
     Parameters
     ----------
     raw_data : pd.DataFrame
-        Raw input data in train.csv format with columns:
-        - Store: int
-        - DayOfWeek: int
-        - Date: str or datetime
-        - Open: int
-        - Promo: int
-        - StateHoliday: str
-        - SchoolHoliday: int
+        Rows in train.csv format without Sales/Customers: Store, DayOfWeek, Date,
+        Open, Promo, StateHoliday, SchoolHoliday
     store_metadata : pd.DataFrame, optional
-        Store metadata (store.csv). If None, will be loaded from store_path
-    store_path : str, default="data/raw/store.csv"
-        Path to store metadata file (used if store_metadata is None)
+        Store metadata (store.csv). If None, loaded from store_path
+    store_path : str or Path
+        Path to store metadata (used if store_metadata is None)
 
     Returns
     -------
     pd.DataFrame
-        Model-ready features (46 columns, excludes Sales/Date/Store/Customers)
+        Every column (raw, store, and engineered), one row per input row, in input order
+    """
+    df = raw_data.copy()
+    # The cleaning step expects Sales and Customers; no feature uses them
+    for col in ["Sales", "Customers"]:
+        if col not in df.columns:
+            df[col] = 0
+    # Cleaning sorts by Store and Date; remember the input order to restore it
+    df["_input_order"] = range(len(df))
+
+    if store_metadata is None:
+        store_metadata = read_csv(store_path)
+
+    clean_df = basic_cleaning(merge_store_info(df, store_metadata))
+    featured_df = build_all_features(clean_df)
+    featured_df = featured_df.sort_values("_input_order").drop(columns="_input_order")
+    return featured_df.reset_index(drop=True)
+
+
+def select_model_features(featured_df: pd.DataFrame) -> pd.DataFrame:
+    """Select the model's feature columns (config/params.yaml) with training dtypes."""
+    X = featured_df[get_model_features()].copy()
+    for col in get_categorical_features():
+        X[col] = X[col].astype(str).astype("category")
+    return X
+
+
+def prepare_prediction_data(
+    raw_data: pd.DataFrame,
+    store_metadata: pd.DataFrame | None = None,
+    store_path: Union[str, Path] = STORE_PATH,
+) -> pd.DataFrame:
+    """Turn raw request rows into model-ready features.
+
+    Parameters
+    ----------
+    raw_data : pd.DataFrame
+        Rows with Store, DayOfWeek, Date, Open, Promo, StateHoliday, SchoolHoliday
+    store_metadata : pd.DataFrame, optional
+        Store metadata (store.csv). If None, loaded from store_path
+    store_path : str or Path
+        Path to store metadata (used if store_metadata is None)
+
+    Returns
+    -------
+    pd.DataFrame
+        The 12 model features, one row per input row, in input order
 
     Examples
     --------
-    >>> import pandas as pd
     >>> raw_data = pd.DataFrame({
-    ...     "Store": [1],
-    ...     "DayOfWeek": [5],
-    ...     "Date": ["2015-08-01"],
-    ...     "Open": [1],
-    ...     "Promo": [1],
-    ...     "StateHoliday": ["0"],
-    ...     "SchoolHoliday": [0]
+    ...     "Store": [1], "DayOfWeek": [5], "Date": ["2015-08-07"], "Open": [1],
+    ...     "Promo": [1], "StateHoliday": ["0"], "SchoolHoliday": [0],
     ... })
-    >>> features = prepare_prediction_data(raw_data)
-    >>> features.shape
-    (1, 46)
+    >>> prepare_prediction_data(raw_data).shape
+    (1, 12)
     """
     logger.info(f"Preparing {len(raw_data)} records for prediction")
-
-    # Make a copy to avoid modifying input
-    df = raw_data.copy()
-
-    # Step 1: Add dummy Sales and Customers columns if not present
-    # These are required by the cleaning pipeline but will be dropped later
-    if "Sales" not in df.columns:
-        df["Sales"] = 0
-        logger.debug("Added dummy Sales column")
-    if "Customers" not in df.columns:
-        df["Customers"] = 0
-        logger.debug("Added dummy Customers column")
-
-    # Step 2: Load store metadata if not provided
-    if store_metadata is None:
-        logger.info(f"Loading store metadata from {store_path}")
-        store_metadata = read_csv(store_path)
-        logger.info(f"Loaded metadata for {len(store_metadata)} stores")
-
-    # Step 3: Merge with store metadata
-    logger.info("Merging with store metadata")
-    merged_df = merge_store_info(df, store_metadata)
-
-    # Step 4: Clean the data
-    logger.info("Cleaning data")
-    clean_df = basic_cleaning(merged_df)
-
-    # Step 5: Engineer features
-    logger.info("Engineering features")
-    featured_df = build_all_features(clean_df)
-
-    # Step 6: Extract model-ready features
-    # CRITICAL: Must exclude same columns as training pipeline
-    feature_cols = [c for c in featured_df.columns if c not in EXCLUDED_COLUMNS]
-    model_features = featured_df[feature_cols]
-
-    logger.info(f"Prepared {len(model_features)} records with {len(feature_cols)} features")
-
-    return model_features
+    return select_model_features(build_prediction_features(raw_data, store_metadata, store_path))
 
 
 def prepare_prediction_data_from_csv(
     csv_path: str,
-    store_metadata: Optional[pd.DataFrame] = None,
-    store_path: str = "data/raw/store.csv",
+    store_metadata: pd.DataFrame | None = None,
+    store_path: Union[str, Path] = STORE_PATH,
 ) -> pd.DataFrame:
     """Load raw data from CSV and prepare for predictions.
 
@@ -139,19 +146,13 @@ def prepare_prediction_data_from_csv(
         Path to CSV file with raw prediction data (train.csv format)
     store_metadata : pd.DataFrame, optional
         Store metadata. If None, will be loaded from store_path
-    store_path : str, default="data/raw/store.csv"
+    store_path : str or Path
         Path to store metadata file
 
     Returns
     -------
     pd.DataFrame
         Model-ready features
-
-    Examples
-    --------
-    >>> features = prepare_prediction_data_from_csv("new_data.csv")
-    >>> features.shape
-    (100, 46)
     """
     logger.info(f"Loading raw data from {csv_path}")
     raw_data = read_csv(csv_path)
@@ -161,47 +162,21 @@ def prepare_prediction_data_from_csv(
 
 
 def get_feature_columns() -> list[str]:
-    """Get the list of expected feature column names for the model.
-
-    This is useful for validation and documentation purposes.
-
-    Returns
-    -------
-    list of str
-        Expected feature column names (sorted alphabetically)
-
-    Notes
-    -----
-    This requires loading actual data to determine feature names.
-    For a static list, see the training code or model artifacts.
-    """
-    # Load a small sample to get feature names
-    logger.info("Determining feature columns from sample data")
-
-    # Use a minimal sample
-    sample_data = pd.DataFrame(
-        {
-            "Store": [1],
-            "DayOfWeek": [1],
-            "Date": ["2015-01-01"],
-            "Open": [1],
-            "Promo": [0],
-            "StateHoliday": ["0"],
-            "SchoolHoliday": [0],
-        }
-    )
-
-    features = prepare_prediction_data(sample_data)
-    return sorted(features.columns.tolist())
+    """Return the model's feature column names (from config/params.yaml)."""
+    return get_model_features()
 
 
-def validate_input_data(raw_data: pd.DataFrame) -> tuple[bool, list[str]]:
+def validate_input_data(
+    raw_data: pd.DataFrame, known_stores: set[int] | None = None
+) -> tuple[bool, list[str]]:
     """Validate that raw input data has required columns and types.
 
     Parameters
     ----------
     raw_data : pd.DataFrame
         Raw input data to validate
+    known_stores : set of int, optional
+        Store IDs the system has data for. If None, read from data/raw/store.csv
 
     Returns
     -------
@@ -231,8 +206,15 @@ def validate_input_data(raw_data: pd.DataFrame) -> tuple[bool, list[str]]:
     if "Store" in raw_data.columns:
         if not pd.api.types.is_integer_dtype(raw_data["Store"]):
             errors.append("Store must be integer type")
-        elif (raw_data["Store"] < 1).any() or (raw_data["Store"] > 1115).any():
-            errors.append("Store must be between 1 and 1115")
+        else:
+            if known_stores is None:
+                known_stores = get_known_stores()
+            unknown = sorted(set(raw_data["Store"].astype(int)) - known_stores)
+            if unknown:
+                errors.append(
+                    f"Unknown store ID(s) {unknown}: this system has data for "
+                    f"{len(known_stores)} stores (see data/raw/store.csv)"
+                )
 
     if "DayOfWeek" in raw_data.columns:
         if not pd.api.types.is_integer_dtype(raw_data["DayOfWeek"]):
@@ -270,9 +252,9 @@ def main():
     # Example 1: Prepare data from DataFrame
     sample_data = pd.DataFrame(
         {
-            "Store": [1, 1, 2],
+            "Store": [1, 1, 21],
             "DayOfWeek": [5, 6, 5],
-            "Date": ["2015-08-01", "2015-08-02", "2015-08-01"],
+            "Date": ["2015-08-07", "2015-08-08", "2015-08-07"],
             "Open": [1, 1, 1],
             "Promo": [1, 0, 1],
             "StateHoliday": ["0", "0", "0"],

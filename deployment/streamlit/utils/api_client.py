@@ -140,7 +140,7 @@ class APIClient:
         Parameters
         ----------
         store : int
-            Store ID (1-1115)
+            Store ID (one of the stores in data/raw/store.csv)
         day_of_week : int
             Day of week (1=Monday, 7=Sunday)
         date : str

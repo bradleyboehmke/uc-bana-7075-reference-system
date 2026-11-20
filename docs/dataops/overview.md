@@ -93,7 +93,7 @@ Great Expectations provides automated data quality checks at three critical stag
 Core data transformation scripts:
 
 - **`make_dataset.py`** - Merges raw files, cleans data, handles missing values
-- **`build_features.py`** - Engineers calendar, promo, lag, and rolling features
+- **`build_features.py`** - Engineers calendar and promo features
 
 **Benefits:**
 

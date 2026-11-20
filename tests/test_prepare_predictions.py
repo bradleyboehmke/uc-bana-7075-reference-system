@@ -10,9 +10,11 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from data.prepare_predictions import (
+    get_known_stores,
     prepare_prediction_data,
     validate_input_data,
 )
+from features.build_features import get_model_features
 
 
 @pytest.fixture
@@ -57,54 +59,45 @@ def test_prepare_prediction_data_shape(sample_raw_data, sample_store_metadata):
     # Should have 3 rows (same as input)
     assert len(features) == 3
 
-    # Should have 46 features (excluding Sales, Date, Store, Customers)
-    assert features.shape[1] == 46
+    # One column per model feature, in config order
+    assert features.columns.tolist() == get_model_features()
 
 
 def test_prepare_prediction_data_columns(sample_raw_data, sample_store_metadata):
-    """Test that prepare_prediction_data returns expected columns."""
+    """Identifiers, the target, and Customers are never model inputs."""
     features = prepare_prediction_data(sample_raw_data, store_metadata=sample_store_metadata)
-
-    # Check that excluded columns are not present
-    excluded_cols = ["Sales", "Date", "Store", "Customers"]
-    for col in excluded_cols:
+    for col in ["Sales", "Date", "Store", "Customers"]:
         assert col not in features.columns, f"Column '{col}' should be excluded"
 
-    # Check that some expected features are present
-    expected_features = [
-        "DayOfWeek",
-        "Open",
-        "Promo",
-        "StoreType",
-        "Assortment",
-        "CompetitionDistance",
-        "Year",
-        "Month",
-        "Week",
-        "IsWeekend",
-        "Season",
-    ]
-    for col in expected_features:
-        assert col in features.columns, f"Expected feature '{col}' is missing"
+
+def test_prepare_prediction_data_preserves_input_order(sample_store_metadata):
+    """Rows come back in request order, even though cleaning sorts by Store and Date."""
+    raw = pd.DataFrame(
+        {
+            "Store": [2, 1],
+            "DayOfWeek": [5, 5],
+            "Date": ["2015-08-07", "2015-08-07"],
+            "Open": [1, 1],
+            "Promo": [1, 1],
+            "StateHoliday": ["0", "0"],
+            "SchoolHoliday": [0, 0],
+        }
+    )
+    features = prepare_prediction_data(raw, store_metadata=sample_store_metadata)
+    # Store 2 is type "b", store 1 is type "a" in the fixture
+    assert features["StoreType"].astype(str).tolist() == ["b", "a"]
 
 
 def test_prepare_prediction_data_no_nulls(sample_raw_data, sample_store_metadata):
     """Test that prepare_prediction_data handles missing values properly."""
     features = prepare_prediction_data(sample_raw_data, store_metadata=sample_store_metadata)
 
-    # Check for unexpected NaN values in non-lag features
-    # (Lag features may have NaN for first observations)
-    non_lag_cols = [c for c in features.columns if "Lag" not in c and "Rolling" not in c]
-    for col in non_lag_cols:
-        null_count = features[col].isna().sum()
-        assert (
-            null_count == 0
-        ), f"Column '{col}' has {null_count} null values (non-lag features should not have nulls)"
+    assert features.isna().sum().sum() == 0
 
 
 def test_validate_input_data_valid(sample_raw_data):
     """Test validation with valid data."""
-    is_valid, errors = validate_input_data(sample_raw_data)
+    is_valid, errors = validate_input_data(sample_raw_data, known_stores={1, 2})
 
     assert is_valid is True
     assert len(errors) == 0
@@ -121,13 +114,13 @@ def test_validate_input_data_missing_columns():
     assert "Missing required columns" in errors[0]
 
 
-def test_validate_input_data_invalid_store_range():
-    """Test validation with Store ID out of range."""
+def test_validate_input_data_unknown_store():
+    """Store IDs outside data/raw/store.csv are rejected with a clear message."""
     invalid_data = pd.DataFrame(
         {
-            "Store": [9999],  # Invalid: > 1115
+            "Store": [500],
             "DayOfWeek": [5],
-            "Date": ["2015-08-01"],
+            "Date": ["2015-08-07"],
             "Open": [1],
             "Promo": [1],
             "StateHoliday": ["0"],
@@ -135,10 +128,17 @@ def test_validate_input_data_invalid_store_range():
         }
     )
 
-    is_valid, errors = validate_input_data(invalid_data)
+    is_valid, errors = validate_input_data(invalid_data, known_stores={1, 2})
 
     assert is_valid is False
-    assert any("Store must be between 1 and 1115" in err for err in errors)
+    assert any("Unknown store ID(s) [500]" in err for err in errors)
+
+
+def test_known_stores_match_store_csv():
+    """The system knows exactly the 100 stores in data/raw/store.csv."""
+    stores = get_known_stores()
+    assert len(stores) == 100
+    assert 1 in stores
 
 
 def test_validate_input_data_invalid_dayofweek():
@@ -221,7 +221,7 @@ def test_prepare_prediction_data_adds_dummy_columns(sample_store_metadata):
 
     # Should successfully create features
     assert len(features) == 1
-    assert features.shape[1] == 46
+    assert features.shape[1] == len(get_model_features())
 
 
 def test_prepare_prediction_data_preserves_row_count(sample_raw_data, sample_store_metadata):
@@ -236,7 +236,7 @@ def test_prepare_prediction_data_dtypes(sample_raw_data, sample_store_metadata):
     features = prepare_prediction_data(sample_raw_data, store_metadata=sample_store_metadata)
 
     # Categorical features should be category dtype
-    categorical_features = ["StoreType", "Assortment", "StateHoliday", "PromoInterval"]
+    categorical_features = ["StoreType", "Assortment", "StateHoliday"]
     for col in categorical_features:
         if col in features.columns:
             assert (
@@ -244,7 +244,7 @@ def test_prepare_prediction_data_dtypes(sample_raw_data, sample_store_metadata):
             ), f"Column '{col}' should be category dtype"
 
     # Numeric features should be numeric
-    numeric_features = ["Open", "Promo", "CompetitionDistance", "Year", "Month"]
+    numeric_features = ["Promo", "CompetitionDistance", "Year", "Month", "Promo2Active"]
     for col in numeric_features:
         if col in features.columns:
             assert pd.api.types.is_numeric_dtype(

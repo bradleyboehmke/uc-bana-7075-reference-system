@@ -86,8 +86,7 @@ pytest tests/ -v
 python -c "
 import pandas
 import lightgbm
-import xgboost
-import catboost
+import mlflow
 print('✓ All packages installed successfully')
 "
 ```
@@ -163,21 +162,11 @@ python -m src.features.build_features
 Explore different modeling approaches:
 
 ```bash
-# Option A: Jupyter Notebooks (recommended for learning)
-jupyter lab
+# Train, log, and register the model (a few seconds)
+python -m src.models.train
 
-# Navigate to notebooks/ and run in order:
-# - 01-eda-and-cleaning.ipynb
-# - 02-feature-engineering.ipynb
-# - 03-baseline-models.ipynb
-# - 04-advanced-models-and-ensembles.ipynb
-```
-
-```bash
-# Once you are done running the notebooks above, you can
-# run the python scripts to mimic production model training:
-python -m src.models.train_ensemble
-python -m src.models.validate_model
+# Promote to Staging if it passes the RMSPE threshold
+python src/models/validate_model.py
 ```
 
 **Learn more**: [Model Training Guide](../modelops/training.md)

@@ -73,8 +73,6 @@ def sample_features():
             "CompetitionDistance": [1270.0, 1270.0, 570.0],
             "Promo2": [1, 1, 0],
             "IsPromo2Active": [1, 1, 0],
-            "sales_lag_7": [5530.0, 5550.0, 6100.0],
-            "sales_rolling_mean_7": [5600.0, 5610.0, 6050.0],
         }
     )
 
@@ -258,39 +256,6 @@ def test_log_multiple_batches(temp_db, sample_raw_inputs, sample_features, sampl
     versions = df["model_version"].unique()
     assert "1" in versions
     assert "2" in versions
-
-
-def test_handles_missing_lag_features(temp_db, sample_raw_inputs, sample_predictions):
-    """Test that logger handles missing lag features gracefully."""
-    logger = PredictionLogger(temp_db)
-
-    # Features without lag columns
-    features_no_lags = pd.DataFrame(
-        {
-            "month": [1, 1, 1],
-            "year": [2015, 2015, 2015],
-            "StoreType": ["c", "c", "a"],
-            "Assortment": ["a", "a", "c"],
-            "CompetitionDistance": [1270.0, 1270.0, 570.0],
-            "Promo2": [1, 1, 0],
-            "IsPromo2Active": [1, 1, 0],
-        }
-    )
-
-    # Should not raise error
-    logger.log_predictions(
-        raw_inputs=sample_raw_inputs,
-        features=features_no_lags,
-        predictions=sample_predictions,
-        model_version="1",
-    )
-
-    # Verify NULL values for lag features
-    with sqlite3.connect(temp_db) as conn:
-        df = pd.read_sql_query("SELECT sales_lag_7, sales_rolling_mean_7 FROM predictions", conn)
-
-    assert df["sales_lag_7"].isna().all()
-    assert df["sales_rolling_mean_7"].isna().all()
 
 
 # =============================================================================

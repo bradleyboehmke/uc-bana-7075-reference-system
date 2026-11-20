@@ -45,7 +45,7 @@ The forecasting challenge requires predicting sales for a 6-week period, with pe
 The Rossmann Sales Forecasting project is a **production-ready ML system** that showcases modern MLOps practices:
 
 - 📊 **DataOps**: Data versioning (DVC), validation (Great Expectations), reproducible pipelines
-- 🤖 **ModelOps**: Experiment tracking (MLflow), model registry, hyperparameter tuning
+- 🤖 **ModelOps**: Experiment tracking (MLflow), model registry, validation and promotion
 - 🚀 **Deployment**: REST API (FastAPI), interactive dashboard (Streamlit), containerization (Docker)
 - 📈 **Monitoring**: Data drift detection (Evidently), model performance tracking
 - ✅ **CI/CD**: Automated testing (pytest), GitHub Actions workflows
@@ -112,7 +112,7 @@ The Rossmann Sales Forecasting project is a **production-ready ML system** that 
 - **Python 3.10+** with modern packaging (`uv`, `pyproject.toml`)
 - **Pandas** for data manipulation
 - **Scikit-learn** for preprocessing and metrics
-- **LightGBM, XGBoost, CatBoost** for gradient boosting
+- **LightGBM** for gradient boosting
 
 ### MLOps Tools
 

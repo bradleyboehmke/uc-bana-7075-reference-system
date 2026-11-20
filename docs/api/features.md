@@ -1,16 +1,24 @@
 # Feature Engineering API
 
-This module contains functions for creating features from cleaned Rossmann sales data.
+`src/features/build_features.py` creates the features the model needs from the cleaned data.
 
 ## Overview
 
-The feature engineering pipeline creates 32+ standard features organized into categories:
+The model uses 12 features in four groups. Most are columns already in the raw data; this module creates four of them (Year, Month, Week, Promo2Active).
 
-- **Calendar features** - Year, month, week, day-of-week, seasonality
-- **Promotion features** - Promo, Promo2, durations, intervals
-- **Competition features** - Distance, age, opened flags
-- **Lag features** - Store-level lags \[1, 7, 14, 28 days\]
-- **Rolling features** - Rolling means and standard deviations
+| Group | Features | Source |
+|---|---|---|
+| When | `DayOfWeek` | train.csv |
+| | `Month`, `Week`, `Year` | Created from `Date` |
+| Store | `StoreType`, `Assortment`, `CompetitionDistance` | store.csv |
+| Promotions | `Promo` | train.csv |
+| | `Promo2` | store.csv |
+| | `Promo2Active` | Created from `Date`, `Promo2`, `PromoInterval` |
+| Holidays | `StateHoliday`, `SchoolHoliday` | train.csv |
+
+The authoritative list is `features.model_features` in `config/params.yaml`; `get_model_features()` returns it.
+
+Every feature is known in advance for any future date. None is computed from past sales, so the features the API builds for a request match the ones training used.
 
 ## Module Reference
 
@@ -22,162 +30,45 @@ The feature engineering pipeline creates 32+ standard features organized into ca
 
 ## Usage Examples
 
-### Basic Usage
-
 ```python
-from src.features.build_features import (
-    add_calendar_features,
-    add_promo_features,
-    add_competition_features,
-    add_lag_features,
-    add_rolling_features,
-    build_all_features
-)
+from features.build_features import build_all_features, get_model_features
+from utils.io import read_parquet
 
-# Build all features at once
-df_with_features = build_all_features(clean_df)
-
-# Or build features individually
-df = add_calendar_features(clean_df)
-df = add_promo_features(df)
-df = add_competition_features(df)
-df = add_lag_features(df)
-df = add_rolling_features(df)
+df = read_parquet("data/processed/train_clean.parquet")
+df = build_all_features(df)
+X = df[get_model_features()]
 ```
 
-### Running the Full Pipeline
+From the command line:
 
 ```bash
-# From command line
 python -m src.features.build_features
-
-# This will:
-# 1. Load data/processed/train_clean.parquet
-# 2. Build all standard features
-# 3. Save to data/processed/train_features.parquet
+# Reads data/processed/train_clean.parquet
+# Writes data/processed/train_features.parquet
 ```
 
-## Feature Categories
+## Created features
 
-### Calendar Features
+### Calendar: `add_calendar_features()`
 
-```python
-df = add_calendar_features(df)
-```
+- `Year`: calendar year
+- `Month`: 1–12
+- `Week`: ISO week of the year, 1–53
 
-Creates:
+### Promotions: `add_promo_features()`
 
-- `Year`, `Month`, `Quarter` - Date components
-- `DayOfMonth`, `WeekOfYear` - Temporal position
-- `IsMonthStart`, `IsMonthEnd` - Month boundary flags
-- `Season` - Meteorological season (Winter, Spring, Summer, Fall)
-
-### Promotion Features
-
-```python
-df = add_promo_features(df)
-```
-
-Creates:
-
-- `Promo2Active` - Whether Promo2 is currently active
-- `Promo2Duration` - Days since Promo2 started
-- `PromoActiveThisMonth` - Promo2 active in current month based on PromoInterval
-
-### Competition Features
-
-```python
-df = add_competition_features(df)
-```
-
-Creates:
-
-- `CompetitionDistance` - Log-transformed distance (handles missing values)
-- `CompetitionAge` - Days since competition opened
-- `HasCompetition` - Binary flag for competition presence
-
-### Lag Features
-
-```python
-df = add_lag_features(df, lags=[1, 7, 14, 28])
-```
-
-Creates store-level lags:
-
-- `lag_sales_1` - Sales from 1 day ago
-- `lag_sales_7` - Sales from 7 days ago (last week)
-- `lag_sales_14` - Sales from 14 days ago
-- `lag_sales_28` - Sales from 28 days ago (4 weeks)
-
-**IMPORTANT:** Uses `groupby("Store").shift(lag)` to prevent data leakage across stores.
-
-### Rolling Features
-
-```python
-df = add_rolling_features(df, windows=[7, 14, 28, 60])
-```
-
-Creates store-level rolling statistics:
-
-- `rolling_mean_sales_7` - 7-day average sales
-- `rolling_std_sales_7` - 7-day sales volatility
-- Similar features for 14, 28, and 60-day windows
-
-**IMPORTANT:** Uses `groupby("Store").rolling(window)` to prevent data leakage across stores.
+- `Promo2Active`: 1 when the store takes part in Promo2 **and** the current month is listed in its `PromoInterval` (for example `"Jan,Apr,Jul,Oct"`), else 0
 
 ## Data Flow
 
 ```mermaid
-flowchart TD
+graph LR
     A[train_clean.parquet] --> B[add_calendar_features]
     B --> C[add_promo_features]
-    C --> D[add_competition_features]
-    D --> E[add_lag_features]
-    E --> F[add_rolling_features]
-    F --> G[train_features.parquet]
-```
-
-## Time-Series Safety
-
-All lag and rolling features are designed to prevent **data leakage**:
-
-```python
-# ✅ CORRECT: Store-level lags prevent future data from influencing past
-df["lag_sales_7"] = df.groupby("Store")["Sales"].shift(7)
-
-# ❌ WRONG: Global lag would leak data across stores
-df["lag_sales_7"] = df["Sales"].shift(7)
-```
-
-This ensures:
-
-- Each store's features only use that store's historical data
-- No future information leaks into training features
-- Time-series cross-validation remains valid
-
-## Key Functions
-
-### build_all_features()
-
-Orchestrates all feature engineering functions in the correct order.
-
-**Parameters:**
-
-- `df`: Cleaned dataframe from data processing
-
-**Returns:**
-
-- Dataframe with 32+ engineered features
-
-**Example:**
-
-```python
-features_df = build_all_features(clean_df)
-print(features_df.shape)  # (1,017,209, 50+)
+    C --> D[train_features.parquet]
 ```
 
 ## Related Modules
 
-- [Data](data.md) - Data loading and cleaning
-- [Models](models.md) - Model training using features
-- [Evaluation](evaluation.md) - Feature importance analysis
+- [Data API](data.md) - Loading and cleaning the raw data
+- [Models API](models.md) - Training on these features
