@@ -64,7 +64,6 @@ docs/
 │   ├── tracking.md            # MLflow tracking
 │   ├── training.md            # Model training
 │   ├── registry.md            # Model registry
-│   └── tuning.md              # Hyperparameter tuning
 ├── deployment/
 │   ├── overview.md            # Deployment guide
 │   ├── fastapi.md             # FastAPI setup

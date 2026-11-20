@@ -17,12 +17,12 @@ This project implements a **staged promotion workflow** with automated validatio
 
 ```mermaid
 graph TB
-    A[Train Ensemble Model] --> B[Register to MLflow]
+    A[Train LightGBM Model] --> B[Register to MLflow]
     B --> C[Registered - No Stage]
 
     C --> D{Automated Validation}
-    D -->|RMSPE < 0.10| E[Promote to Staging]
-    D -->|RMSPE ≥ 0.10| F[Reject - Retrain Required]
+    D -->|RMSPE <= max_rmspe| E[Promote to Staging]
+    D -->|RMSPE > max_rmspe| F[Reject - Retrain Required]
 
     E --> G[Run Inference Tests]
     G --> H{Manual Review}
@@ -56,7 +56,7 @@ graph TB
 
 **Staging**
 
-- Model passed automated validation (RMSPE \< 0.10 threshold)
+- Model passed automated validation (RMSPE at or below `validation.max_rmspe` in `config/params.yaml`, currently 0.20)
 - Ready for manual testing and review
 - **Testing**: Run inference on sample data, review predictions in MLflow UI
 - **Next step**: Manual promotion to Production after approval
@@ -75,18 +75,18 @@ graph TB
 
 ## Model Registration
 
-When the production training pipeline completes, it automatically registers the ensemble model to MLflow Model Registry:
+When the training pipeline completes, it registers the LightGBM model in the MLflow Model Registry:
 
 ```mermaid
 graph LR
-    A[train_ensemble.py] --> B{Training Complete}
-    B --> C[Package Ensemble]
+    A[train.py] --> B{Training Complete}
+    B --> C[Package Model]
     C --> D[Log to MLflow]
     D --> E[Register Model]
     E --> F[Version Number Assigned]
 
     D -.-> G[Hyperparameters]
-    D -.-> H[CV Metrics]
+    D -.-> H[Holdout Metrics]
     D -.-> I[Model Artifacts]
     D -.-> J[Data Version DVC]
 
@@ -96,22 +96,20 @@ graph LR
 
 **What gets registered:**
 
-- **Model artifact**: Serialized ensemble (LightGBM + XGBoost + CatBoost)
-- **Dependencies**: Conda environment with exact library versions
-- **Metadata**: Hyperparameters, ensemble weights, training metrics
+- **Model artifact**: The LightGBM model (MLflow `lightgbm` flavor)
+- **Dependencies**: The library versions MLflow records with the model
+- **Metadata**: Hyperparameters, feature list, holdout metrics
 - **Lineage**: Link to training run, data version (DVC hash)
 
 **Example registration output:**
 
 ```bash
-$ python src/models/train_ensemble.py
+$ python -m src.models.train
 
-Training LightGBM... ✓
-Training XGBoost... ✓
-Training CatBoost... ✓
-Creating ensemble... ✓
-Registering model to MLflow Model Registry...
-✓ Model registered: rossmann-ensemble version 7
+Train: 87,792 rows to 2015-06-19; holdout: 4,200 rows from 2015-06-20
+Trained in 1.2s
+Holdout RMSPE 0.1599, RMSE 899, MAE 670
+Created version '7' of model 'rossmann-model'.
 ```
 
 ## Automated Validation and Staging Promotion
@@ -127,7 +125,7 @@ python src/models/validate_model.py
 
 1. **Load latest model** from registry (most recent version in "None" stage)
 1. **Evaluate on holdout set**: Calculate RMSPE on validation data not seen during training
-1. **Check threshold**: If RMSPE \< 0.10, proceed to promotion
+1. **Check threshold**: If RMSPE is at or below `validation.max_rmspe`, proceed to promotion
 1. **Promote to Staging**: Automatically transition model stage
 1. **Log validation metrics**: Record validation RMSPE, timestamp, data version
 
@@ -138,13 +136,13 @@ $ python src/models/validate_model.py
 
 Loading model version 7...
 Evaluating on holdout validation set...
-Validation RMSPE: 0.0978
-✓ Performance meets threshold (< 0.10)
+Validation RMSPE: 0.1599
+✓ Performance meets threshold (<= 0.20)
 Promoting to Staging...
 ✓ Model version 7 promoted to Staging
 ```
 
-If validation fails (RMSPE ≥ 0.10), the model remains in "None" stage and requires retraining with improved features or hyperparameters.
+If validation fails (RMSPE above the threshold), the model remains in "None" stage and requires retraining with improved features or hyperparameters.
 
 ## Manual Production Promotion
 
@@ -274,6 +272,5 @@ python src/models/validate_model.py --promote-to-production --version 5
 
 ## Next Steps
 
-- **[Hyperparameter Tuning](tuning.md)**: Learn how to optimize models for better validation performance
 - **[Experiment Tracking](tracking.md)**: Understand how training experiments link to registered models
 - **[Model Training](training.md)**: Review the production training pipeline that creates registered models

@@ -2,7 +2,7 @@
 
 ## Overview
 
-The FastAPI service is the **model serving layer** that loads trained ensemble models from MLflow and serves predictions via REST API. It acts as the bridge between the MLflow Model Registry and client applications (Streamlit UI, batch scripts, external systems).
+The FastAPI service is the **model serving layer** that loads the trained LightGBM model from MLflow and serves predictions via REST API. It acts as the bridge between the MLflow Model Registry and client applications (Streamlit UI, batch scripts, external systems).
 
 **Location:** `deployment/api/`
 
@@ -47,8 +47,8 @@ flowchart TB
         P1[Validate input data]
         P2[Merge store metadata]
         P3[Clean data]
-        P4[Engineer 46 features]
-        P5[Run ensemble model]
+        P4[Engineer 12 features]
+        P5[Run LightGBM model]
         P6[Return predictions]
 
         P1 --> P2 --> P3 --> P4 --> P5 --> P6
@@ -107,9 +107,9 @@ async def startup_event():
 ```python
 def load_model(self, stage: str = "Production") -> None:
     """Load model from MLflow Model Registry."""
-    model_uri = f"models:/rossmann-ensemble/{stage}"
+    model_uri = f"models:/rossmann-model/{stage}"
     self.model = mlflow.pyfunc.load_model(model_uri)
-    self.model_version = get_model_version("rossmann-ensemble", stage)
+    self.model_version = get_model_version("rossmann-model", stage)
 ```
 
 **Prediction pipeline:**
@@ -138,7 +138,7 @@ def predict(self, input_data: pd.DataFrame) -> np.ndarray:
 ```python
 class PredictionInput(BaseModel):
     """Single prediction input in train.csv format."""
-    Store: int = Field(..., ge=1, le=1115)
+    Store: int = Field(..., ge=1)  # must also be a store in data/raw/store.csv
     DayOfWeek: int = Field(..., ge=1, le=7)
     Date: str = Field(..., regex=r"^\d{4}-\d{2}-\d{2}$")
     Open: int = Field(..., ge=0, le=1)
@@ -202,7 +202,7 @@ GET /model/info
   "production_version": 3,
   "staging_version": 4,
   "registered_models": [
-    "rossmann-ensemble"
+    "rossmann-model"
   ]
 }
 ```
@@ -262,115 +262,72 @@ Same endpoint handles multiple records:
 
 ## Feature Engineering Pipeline
 
-One of the biggest challenges in production ML is ensuring that your model receives data in exactly the same format during inference as it saw during training. This section explains how the FastAPI service automatically handles the complex transformation from simple user inputs to the 46 engineered features the model expects, while guaranteeing consistency with the training pipeline.
+One of the biggest challenges in production ML is ensuring that your model receives data in exactly the same format during inference as it saw during training. This section explains how the FastAPI service automatically handles the complex transformation from simple user inputs to the 12 features the model expects, while guaranteeing consistency with the training pipeline.
 
 ### The Challenge: Inference vs Training
 
-**Problem:** Models are trained on 46 engineered features, but users should only provide 7 basic fields.
+**Problem:** The model is trained on 12 features, but users should only provide 7 basic fields.
 
-**Solution:** API automatically applies identical transformations used in training:
+**Solution:** The API applies the same transformations training uses:
 
 ```mermaid
 flowchart TD
     Input["📥 User Input<br/>7 Simple Fields<br/><br/>Store • DayOfWeek • Date<br/>Open • Promo<br/>StateHoliday • SchoolHoliday"]
 
-    P1["1️⃣ Merge store.csv metadata<br/><i>Adds: StoreType, Assortment, CompetitionDistance, Promo2, etc.</i>"]
-    P2["2️⃣ Add calendar features<br/><i>Adds: Year, Month, Week, Quarter, Season, IsMonthStart, IsMonthEnd, etc.</i>"]
-    P3["3️⃣ Add promo features<br/><i>Adds: Promo2Active, Promo2Duration, PromoActiveThisMonth, etc.</i>"]
-    P4["4️⃣ Add competition features<br/><i>Adds: CompetitionAge, HasCompetition</i>"]
-    P5["5️⃣ Add lag features<br/><i>Adds: Sales_Lag_1, Sales_Lag_7, Sales_Lag_14, Sales_Lag_28</i>"]
-    P6["6️⃣ Add rolling features<br/><i>Adds: Rolling means/stds for windows 7, 14, 28, 60 days</i>"]
+    P1["1️⃣ Merge store.csv metadata<br/><i>Adds: StoreType, Assortment, CompetitionDistance, Promo2, PromoInterval</i>"]
+    P2["2️⃣ Add calendar features<br/><i>Adds: Year, Month, Week</i>"]
+    P3["3️⃣ Add promo features<br/><i>Adds: Promo2Active</i>"]
 
-    Output["📤 Model-Ready Features<br/>46 Total Fields<br/><br/>Original 7 + Store metadata 5 + Calendar 8 +<br/>Promo 6 + Competition 2 + Lag 8 + Rolling 10"]
+    Output["📤 Model-Ready Features<br/>12 fields (config/params.yaml)"]
 
     Input ==> P1
     P1 --> P2
     P2 --> P3
-    P3 --> P4
-    P4 --> P5
-    P5 --> P6
-    P6 ==> Output
+    P3 ==> Output
 
     style Input fill:#e3f2fd,stroke:#1976d2,stroke-width:3px
     style Output fill:#e8f5e9,stroke:#388e3c,stroke-width:3px
     style P1 fill:#fff3e0,stroke:#f57c00
     style P2 fill:#fff3e0,stroke:#f57c00
     style P3 fill:#fff3e0,stroke:#f57c00
-    style P4 fill:#fff3e0,stroke:#f57c00
-    style P5 fill:#fff3e0,stroke:#f57c00
-    style P6 fill:#fff3e0,stroke:#f57c00
 ```
+
+No feature is computed from past sales, so a request needs no sales history and the features match what training saw.
 
 ### Unified Preparation Function
 
 **Location:** `src/data/prepare_predictions.py`
 
-**Key function:** `prepare_prediction_data(input_df: pd.DataFrame) -> pd.DataFrame`
+**Key functions:**
 
-**Steps:**
-
-1. **Validate input:** Check required columns, data types, value ranges
-1. **Merge store metadata:** Join with `store.csv` on Store ID
-1. **Clean data:** Handle missing values, convert types, parse dates
-1. **Engineer features:** Apply all feature engineering functions
-1. **Select model features:** Return only the 46 features model expects
+- `validate_input_data(df, known_stores)`: checks required columns, value ranges, and that every store ID is in `data/raw/store.csv`
+- `build_prediction_features(df)`: merges store metadata, cleans, and builds features, returning rows in request order
+- `select_model_features(df)`: keeps the 12 model features with training dtypes
+- `prepare_prediction_data(df)`: the last two steps together
 
 **Example:**
 
 ```python
-from src.data.prepare_predictions import prepare_prediction_data
+from data.prepare_predictions import prepare_prediction_data
 
-# User provides simple input
 input_df = pd.DataFrame({
     "Store": [1],
     "DayOfWeek": [5],
-    "Date": ["2015-08-01"],
+    "Date": ["2015-08-07"],
     "Open": [1],
     "Promo": [1],
     "StateHoliday": ["0"],
     "SchoolHoliday": [0]
 })
 
-# API automatically engineers 46 features
 features = prepare_prediction_data(input_df)
-
-# features now contains:
-# - Original fields: Store, DayOfWeek, Date, Open, Promo, etc.
-# - Store metadata: StoreType, Assortment, CompetitionDistance, etc.
-# - Calendar: Year, Month, Week, IsMonthStart, Season, etc.
-# - Lags: Sales_Lag_1, Sales_Lag_7, Sales_Lag_14, Sales_Lag_28
-# - Rolling: Sales_RollMean_7, Sales_RollStd_7, etc.
+# DayOfWeek, Month, Week, Year, StoreType, Assortment, CompetitionDistance,
+# Promo, Promo2, Promo2Active, StateHoliday, SchoolHoliday
 ```
 
 ### Consistency Guarantee
 
-The same feature engineering code is used in **both training and inference**:
-
-**Training:** `src/features/build_features.py`
-
-```python
-from src.features.build_features import (
-    add_calendar_features,
-    add_promo_features,
-    add_competition_features,
-    add_lag_features,
-    add_rolling_features
-)
-```
-
-**Inference:** `src/data/prepare_predictions.py`
-
-```python
-from src.features.build_features import (
-    add_calendar_features,  # <-- Same functions!
-    add_promo_features,
-    add_competition_features,
-    add_lag_features,
-    add_rolling_features
-)
-```
-
-**Result:** Training and inference use identical transformations, eliminating train/serve skew.
+Training (`src/features/build_features.py` via `make_dataset` and `build_features`) and inference (`src/data/prepare_predictions.py`) call the same `basic_cleaning` and `build_all_features` functions and read the same feature list from `config/params.yaml`, eliminating train/serve skew.
 
 ## Error Handling
 
@@ -382,7 +339,7 @@ A production API must fail gracefully and provide actionable feedback when somet
 
 ```json
 {
-  "detail": "Store ID must be between 1 and 1115"
+  "detail": "Input validation failed: ['Unknown store ID(s) [500]: this system has data for 100 stores (see data/raw/store.csv)']"
 }
 ```
 

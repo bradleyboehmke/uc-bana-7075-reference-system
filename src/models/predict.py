@@ -7,21 +7,21 @@ on new data.
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import pandas as pd
-from utils.io import ensure_dir, read_parquet
 
+from features.build_features import get_categorical_features, get_model_features
 from models.model_registry import get_model_version, load_model
+from utils.io import ensure_dir, load_params, read_parquet
 
 logger = logging.getLogger(__name__)
 
 
 def load_inference_data(
     data_path: str = "data/processed/train_features.parquet",
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
 ) -> tuple:
     """Load data for inference.
 
@@ -57,14 +57,10 @@ def load_inference_data(
     logger.info(f"Loaded {len(df_open):,} rows (open stores)")
     logger.info(f"Date range: {df_open['Date'].min()} to {df_open['Date'].max()}")
 
-    # Define feature columns
-    exclude_cols = ["Sales", "Date", "Store", "Customers"]
-    feature_cols = [col for col in df.columns if col not in exclude_cols]
-
-    # Handle missing features (if any)
-    df_open = df_open.dropna(subset=feature_cols)
-
-    X_features = df_open[feature_cols]
+    feature_cols = get_model_features()
+    X_features = df_open[feature_cols].copy()
+    for col in get_categorical_features():
+        X_features[col] = X_features[col].astype(str).astype("category")
 
     logger.info(f"Features: {len(feature_cols)}")
 
@@ -136,7 +132,7 @@ def save_predictions(
     predictions_df: pd.DataFrame,
     output_path: str,
     model_version: str,
-    metadata: Optional[dict] = None,
+    metadata: dict | None = None,
 ) -> None:
     """Save predictions to CSV with metadata.
 
@@ -185,12 +181,12 @@ def save_predictions(
 
 
 def predict(
-    model_name: str = "rossmann-ensemble",
+    model_name: str | None = None,
     stage: str = "Production",
     data_path: str = "data/processed/train_features.parquet",
     output_path: str = "outputs/predictions/production_predictions.csv",
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
 ) -> pd.DataFrame:
     """Main prediction pipeline.
 
@@ -218,19 +214,20 @@ def predict(
     --------
     >>> # Predict using Production model
     >>> predictions = predict(
-    ...     model_name='rossmann-ensemble',
+    ...     model_name='rossmann-model',
     ...     stage='Production',
     ...     data_path='data/processed/train_features.parquet'
     ... )
     >>>
     >>> # Predict for specific date range
     >>> predictions = predict(
-    ...     model_name='rossmann-ensemble',
+    ...     model_name='rossmann-model',
     ...     stage='Production',
     ...     start_date='2015-07-01',
     ...     end_date='2015-07-31'
     ... )
     """
+    model_name = model_name or load_params()["mlflow"]["model_name"]
     logger.info("=" * 70)
     logger.info("PRODUCTION INFERENCE PIPELINE")
     logger.info("=" * 70)
@@ -284,7 +281,9 @@ def main():
     parser = argparse.ArgumentParser(
         description="Generate predictions using production Rossmann model"
     )
-    parser.add_argument("--model-name", default="rossmann-ensemble", help="Model name in registry")
+    parser.add_argument(
+        "--model-name", default=None, help="Model name in registry (default: from config)"
+    )
     parser.add_argument(
         "--stage",
         default="Production",

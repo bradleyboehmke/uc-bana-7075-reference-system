@@ -18,6 +18,7 @@ sys.path.insert(0, str(streamlit_dir / "utils"))
 from api_client import get_api_client
 from validation import (
     get_csv_template,
+    get_known_stores,
     process_batch_csv,
     validate_batch_csv,
     validate_single_prediction_input,
@@ -33,7 +34,7 @@ api_client = get_api_client()
 st.title("📈 Sales Predictions")
 st.markdown(
     """
-    Generate sales predictions for Rossmann stores using the production ensemble model.
+    Generate sales predictions for Rossmann stores using the production LightGBM model.
     Upload data in **train.csv format** (7 fields only) - the API handles all feature engineering.
     """
 )
@@ -101,13 +102,12 @@ with tab1:
 
         with col1:
             st.markdown("**📍 Store & Date**")
-            store_id = st.number_input(
+            known_stores = get_known_stores()
+            store_id = st.selectbox(
                 "Store ID",
-                min_value=1,
-                max_value=1115,
-                value=1,
-                step=1,
-                help="Store identifier (1-1115)",
+                options=known_stores,
+                index=0,
+                help=f"One of the {len(known_stores)} stores in this system",
             )
 
             prediction_date = st.date_input(
@@ -264,14 +264,14 @@ with tab1:
                         **Predicted Sales:** ${predicted_sales:,.2f}
 
                         This prediction is based on:
-                        - Historical sales patterns for Store {store_id}
+                        - Patterns the model learned from historical sales
                         - Day of week effects ({["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][day_of_week-1]})
                         - Promotion status ({'Active' if promo else 'None'})
                         - Holiday effects ({state_holiday if state_holiday != '0' else 'None'})
-                        - Store metadata (type, assortment, competition)
-                        - Engineered time-series features (lags, rolling averages)
+                        - Store metadata (type, assortment, competition distance)
+                        - Calendar effects (week, month, year)
 
-                        **Model:** {model_stage} ensemble (LightGBM 30% + XGBoost 60% + CatBoost 10%)
+                        **Model:** {model_stage} LightGBM model
                         """
                     )
 

@@ -53,8 +53,7 @@ class PredictionLogger:
 
         # Create tables
         with sqlite3.connect(self.db_path) as conn:
-            conn.execute(
-                """
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS predictions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     timestamp TIMESTAMP NOT NULL,
@@ -74,7 +73,7 @@ class PredictionLogger:
                     state_holiday TEXT,
                     school_holiday INTEGER,
 
-                    -- Key engineered features (~10 important ones for drift detection)
+                    -- Model features used for drift detection
                     month INTEGER,
                     year INTEGER,
                     store_type TEXT,
@@ -83,33 +82,23 @@ class PredictionLogger:
                     promo2 INTEGER,
                     is_promo2_active INTEGER,
 
-                    -- Lag features (if available, may be NULL)
-                    sales_lag_7 REAL,
-                    sales_rolling_mean_7 REAL,
-
                     -- Metadata
                     response_time_ms REAL
                 )
-                """
-            )
+                """)
 
             # Create index for faster queries
-            conn.execute(
-                """
+            conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_timestamp
                 ON predictions(timestamp)
-                """
-            )
-            conn.execute(
-                """
+                """)
+            conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_store_date
                 ON predictions(store_id, date)
-                """
-            )
+                """)
 
             # Optional: Table for actual sales (when ground truth becomes available)
-            conn.execute(
-                """
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS actual_sales (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     store_id INTEGER NOT NULL,
@@ -118,8 +107,7 @@ class PredictionLogger:
                     updated_at TIMESTAMP NOT NULL,
                     UNIQUE(store_id, date)
                 )
-                """
-            )
+                """)
 
             conn.commit()
 
@@ -195,17 +183,6 @@ class PredictionLogger:
                 ),
                 "promo2": int(feature_row.get("Promo2", 0)),
                 "is_promo2_active": int(feature_row.get("Promo2Active", 0)),
-                "sales_lag_7": (
-                    float(feature_row["sales_lag_7"])
-                    if "sales_lag_7" in feature_row and pd.notna(feature_row["sales_lag_7"])
-                    else None
-                ),
-                "sales_rolling_mean_7": (
-                    float(feature_row["sales_rolling_mean_7"])
-                    if "sales_rolling_mean_7" in feature_row
-                    and pd.notna(feature_row["sales_rolling_mean_7"])
-                    else None
-                ),
                 "response_time_ms": response_time_ms,
             }
             records.append(record)

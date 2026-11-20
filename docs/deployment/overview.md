@@ -70,7 +70,7 @@ flowchart BT
     User --> UI
     UI -->|HTTP POST| API
     API -->|Load Model| Registry
-    Registry -->|Ensemble Model| API
+    Registry -->|LightGBM Model| API
     API -->|Predictions| UI
     UI -->|Results| User
 
@@ -88,7 +88,7 @@ flowchart BT
 
 **Key Functions:**
 
-- Stores trained ensemble models (LightGBM + XGBoost + CatBoost)
+- Stores trained LightGBM model versions
 - Manages model versions (1, 2, 3, ...)
 - Tracks model stages (Production, Staging, Archived)
 - Provides API for model retrieval by stage or version
@@ -104,10 +104,10 @@ flowchart BT
 
 **Key Functions:**
 
-- Loads production ensemble model from MLflow on startup
+- Loads the Production model from MLflow on first request
 - Accepts prediction requests in simple train.csv format (7 fields)
 - Automatically merges store metadata from `store.csv`
-- Applies complete feature engineering pipeline (46 features)
+- Applies the same feature engineering as training (12 features)
 - Returns predictions with model version information
 - Supports both single and batch predictions
 
@@ -142,7 +142,7 @@ sequenceDiagram
     participant UI as Streamlit UI
     participant API as FastAPI
     participant FE as Feature Engineering
-    participant Model as Ensemble Model
+    participant Model as LightGBM Model
     participant Registry as MLflow Registry
 
     User->>UI: Enter store, date, promo, etc.
@@ -151,7 +151,7 @@ sequenceDiagram
     UI->>API: POST /predict
 
     API->>Registry: Load model (if not cached)
-    Registry-->>API: Ensemble model
+    Registry-->>API: LightGBM model
 
     API->>API: Merge store metadata
     API->>FE: Engineer features
@@ -172,7 +172,7 @@ sequenceDiagram
     participant UI as Streamlit UI
     participant API as FastAPI
     participant FE as Feature Engineering
-    participant Model as Ensemble Model
+    participant Model as LightGBM Model
 
     User->>UI: Upload CSV (6 fields)
     UI->>UI: Validate CSV schema
@@ -183,7 +183,7 @@ sequenceDiagram
     loop For each row
         API->>API: Merge store metadata
         API->>FE: Engineer features
-        FE-->>API: 46 features
+        FE-->>API: 12 features
         API->>Model: Generate prediction
         Model-->>API: Sales forecast
     end
@@ -290,7 +290,7 @@ Users only provide **7 basic fields** (train.csv format):
 The API automatically handles:
 
 - Merging store metadata (type, assortment, competition distance)
-- Engineering 46 features (lags, rolling averages, calendar features)
+- Engineering 12 features (calendar, store, promotion, holiday)
 - Converting data types and formatting
 
 ### 3. Model Versioning
@@ -316,7 +316,7 @@ This enables:
 
 The API validates inputs and returns clear error messages:
 
-- Invalid store IDs (must be 1-1115)
+- Unknown store IDs (must be one of the stores in data/raw/store.csv)
 - Invalid dates or formats
 - Missing required fields
 - Out-of-range values

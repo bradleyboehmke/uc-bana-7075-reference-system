@@ -205,7 +205,7 @@ Navigate to **Predictions** → **Single Prediction** tab:
 
 1. Fill in the required fields:
 
-    - Store ID (1-1115)
+    - Store ID (one of the 100 stores in `data/raw/store.csv`)
     - Prediction Date (Day of Week is **auto-calculated** from the date)
     - Store Open? (Yes/No)
     - State Holiday type
@@ -402,7 +402,7 @@ The API accepts data in **train.csv format**. You only need to provide 7 fields:
 
 | Field         | Type | Range           | Description                      |
 | ------------- | ---- | --------------- | -------------------------------- |
-| Store         | int  | 1-1115          | Unique store identifier          |
+| Store         | int  | store.csv IDs   | One of the 100 stores with data  |
 | DayOfWeek     | int  | 1-7             | Day of week (1=Monday, 7=Sunday) |
 | Date          | str  | YYYY-MM-DD      | Date in ISO format               |
 | Open          | int  | 0-1             | Store open flag                  |
@@ -413,7 +413,7 @@ The API accepts data in **train.csv format**. You only need to provide 7 fields:
 **The API automatically handles**:
 
 - Loading store metadata (StoreType, Assortment, CompetitionDistance, etc.)
-- Feature engineering (calendar features, lags, rolling stats, etc.)
+- Feature engineering (Year, Month, Week, Promo2Active)
 - Data cleaning and validation
 - Model prediction
 

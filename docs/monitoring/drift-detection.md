@@ -229,7 +229,7 @@ When interpreting drift detection results, several practical factors should be c
 
 **Thresholds may need tuning**: The current thresholds (p-value \< 0.05 for KS test, TVD > 0.2 for categorical features) are reasonable starting points but may need adjustment based on your specific business context. If you're seeing too many false positives (drift alerts for normal variation), consider tightening the thresholds. Conversely, if you're missing important drift events, the thresholds may be too loose.
 
-**Limited feature coverage**: The system only monitors 10 key features out of the 46 total engineered features. While these capture the most important signals, drift in unmonitored features won't be detected. Consider periodically reviewing whether the selected features still represent the most important model inputs.
+**Limited feature coverage**: The system monitors 10 of the 12 model features (Week and Year are not monitored). While these capture the most important signals, drift in unmonitored features won't be detected. Consider periodically reviewing whether the selected features still represent the most important model inputs.
 
 ______________________________________________________________________
 

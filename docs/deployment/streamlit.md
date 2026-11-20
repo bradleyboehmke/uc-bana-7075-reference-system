@@ -88,7 +88,7 @@ The application uses Streamlit's multi-page architecture with three main section
 
 - **Smart input form** with three columns:
 
-    - Store details: Store ID (1-1115)
+    - Store details: Store ID (chosen from the stores in data/raw/store.csv)
     - Date selection: Calendar picker (Day of Week auto-calculated!)
     - Store conditions: Open, Promo, StateHoliday, SchoolHoliday toggles
 
@@ -135,7 +135,7 @@ The application uses Streamlit's multi-page architecture with three main section
 
     - Schema checking (required columns present)
     - Data type validation (Store as integer, Date as valid format)
-    - Range validation (Store 1-1115, valid dates)
+    - Range validation (known store IDs, valid dates)
 
 - **Batch processing**
 
@@ -216,7 +216,7 @@ Store,Date,Open,Promo,StateHoliday,SchoolHoliday,DayOfWeek,Predicted_Sales
 
 **What's validated:**
 
-- **Store ID**: Must be integer between 1 and 1115
+- **Store ID**: Must be one of the stores in `data/raw/store.csv`
 - **Date**: Must be valid date in supported format
 - **Open**: Must be 0 or 1
 - **Promo**: Must be 0 or 1
@@ -272,7 +272,7 @@ You need to:
 
 ```
 ❌ Validation Error
-- Store ID must be between 1 and 1115 (got: 9999)
+- Store 9999 is not one of the 100 stores in this system
 - Date must be in YYYY-MM-DD format (got: "08/01/15")
 ```
 

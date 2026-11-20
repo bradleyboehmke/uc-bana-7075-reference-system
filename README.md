@@ -161,7 +161,7 @@ ______________________________________________________________________
 
 ## 🛠️ Technology Stack
 
-- **Core ML:** pandas, numpy, scikit-learn, lightgbm, xgboost, catboost, optuna
+- **Core ML:** pandas, numpy, scikit-learn, lightgbm
 - **MLOps:** MLflow, FastAPI, Streamlit, Evidently AI
 - **Quality:** pytest, Great Expectations, pre-commit (black, ruff, mdformat)
 - **DevOps:** GitHub Actions, Docker, DVC, uv

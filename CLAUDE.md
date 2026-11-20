@@ -6,7 +6,7 @@ The **reference system** for BANA 7075, ML System Design for Business (Universit
 
 It is a simplified copy of [rossmann-forecasting](https://github.com/bradleyboehmke/rossmann-forecasting) (imported at `9553f37` without history). The subject of the course is the system around the model, not the model. This repository is also a GitHub template: student teams create their project repositories from it.
 
-**Status:** being rebuilt in Phase 1 of the course redesign. The code still reflects the original Rossmann project (three-model ensemble, Optuna tuning, Great Expectations 0.x, DVC with a local remote) until the Phase 1 tasks land. Work is tracked in [issue #1](https://github.com/bradleyboehmke/uc-bana-7075-reference-system/issues/1).
+**Status:** being rebuilt in Phase 1 of the course redesign. REF-04 is done: one LightGBM model with fixed hyperparameters and 12 features listed in `config/params.yaml`. The rest still reflects the original Rossmann project (Great Expectations 0.x, DVC with a local remote) until the remaining Phase 1 tasks land. Work is tracked in [issue #1](https://github.com/bradleyboehmke/uc-bana-7075-reference-system/issues/1).
 
 ## Where the plan lives
 
@@ -57,6 +57,12 @@ python -m src.data.make_dataset
 python src/data/validate_data.py --stage raw
 python -m src.features.build_features
 
+# Model: train and register (seconds), validate and promote, batch predict
+python -m src.models.train
+python src/models/validate_model.py
+python src/models/validate_model.py --promote-to-production
+python src/models/predict.py --stage Production
+
 # Services: MLflow (5000), FastAPI (8000), Streamlit (8501)
 bash scripts/launch_dashboard.sh
 
@@ -68,5 +74,5 @@ python src/monitoring/generate_reports.py --days 7
 ## Known issues
 
 - The docs workflow (`.github/workflows/docs.yml`) fails because unpinned mkdocstrings versions conflict. REF-08 fixes it; students do not use the MkDocs site.
-- Store ID validation still allows 1–1115 (`deployment/api/main.py`, `deployment/streamlit/utils/validation.py`, `src/data/prepare_predictions.py`) although only 100 stores have data. Decide in REF-04.
+- Unpinned `mlflow>=2.8.0` currently installs MLflow 3.x, which refuses the `./mlruns` file store unless `MLFLOW_ALLOW_FILE_STORE=true` is set. Set it locally until REF-08 pins versions (or moves tracking to SQLite). Tests use a temporary SQLite store and are unaffected.
 - This file is written for developing the system. Before launch, REF-09 adds student-facing documentation, and this file should be revisited so student teams that create repositories from the template get guidance suited to them.
