@@ -1,377 +1,181 @@
-"""Data validation using Great Expectations.
+"""Validate the pipeline's data with Great Expectations.
 
-This module validates data quality at different stages of the pipeline:
-- Raw data validation (train.csv, store.csv)
-- Processed data validation (train_clean.parquet)
-- Feature data validation (train_features.parquet)
+The pipeline checks its data at two points:
+
+- ``raw``: the two raw files as they arrive (train.csv and store.csv)
+- ``features``: the feature table, just before training
+
+The rules are in src/data/expectations.py. If any rule fails, this script
+prints which ones and why, then exits with code 1 so the pipeline stops before
+bad data reaches the model. Every run also updates the Data Docs report, a
+browsable web page of the results, at gx/uncommitted/data_docs/local_site/index.html.
+
+The gx/ folder is Great Expectations' working folder. This script creates it on
+the first run and it is not committed: the rules live in expectations.py.
+
+Usage
+-----
+    python src/data/validate_data.py --stage raw
+    python src/data/validate_data.py --stage features
+    python src/data/validate_data.py            # both
 """
-
-from __future__ import annotations
 
 import argparse
 import sys
+import warnings
 from pathlib import Path
-from typing import TYPE_CHECKING
 
+import great_expectations as gx
 import pandas as pd
+from great_expectations.data_context.types.base import ProgressBarsConfig
 
-if TYPE_CHECKING:
-    from great_expectations.core.batch import RuntimeBatchRequest
+sys.path.insert(0, str(Path(__file__).parents[1]))
 
-# Try to import Great Expectations
-try:
-    import great_expectations as gx
-    from great_expectations.checkpoint import SimpleCheckpoint
-    from great_expectations.core.batch import RuntimeBatchRequest
+from data.expectations import features_suite, raw_store_suite, raw_train_suite  # noqa: E402
+from utils.io import PROJECT_ROOT  # noqa: E402
 
-    GX_AVAILABLE = True
-except ImportError:
-    print("Warning: Great Expectations not installed. Validation will be skipped.")
-    GX_AVAILABLE = False
-    # Define dummy classes to avoid NameErrors
-    RuntimeBatchRequest = None
-    SimpleCheckpoint = None
-    gx = None
+RAW_TRAIN_PATH = PROJECT_ROOT / "data" / "raw" / "train.csv"
+RAW_STORE_PATH = PROJECT_ROOT / "data" / "raw" / "store.csv"
+FEATURES_PATH = PROJECT_ROOT / "data" / "processed" / "train_features.parquet"
+DATA_DOCS_PATH = Path("gx") / "uncommitted" / "data_docs" / "local_site" / "index.html"
+
+# GE warns about optional features this project doesn't use.
+warnings.filterwarnings("ignore", module="great_expectations")
 
 
-class DataValidator:
-    """Data validation orchestrator using Great Expectations."""
+def get_context(project_root: Path = PROJECT_ROOT):
+    """Load the Great Expectations project in ``<project_root>/gx/``, creating it if needed."""
+    context = gx.get_context(mode="file", project_root_dir=str(project_root))
+    if context.variables.progress_bars is None:
+        # Progress bars flood the terminal and notebook output; turn them off once.
+        context.variables.progress_bars = ProgressBarsConfig(globally=False)
+        context.variables.save()
+    return context
 
-    def __init__(self, context_root_dir: Path | None = None):
-        """Initialize validator with Great Expectations context.
 
-        Args:
-            context_root_dir: Root directory for GX context. Defaults to project root.
-        """
-        if not GX_AVAILABLE:
-            self.context = None
-            return
+def run_checkpoint(context, df: pd.DataFrame, suite: gx.ExpectationSuite):
+    """Check a dataframe against a suite, save the result, and update Data Docs.
 
-        if context_root_dir is None:
-            context_root_dir = Path(__file__).parents[2] / "great_expectations"
+    This is GE's standard pattern: a data source and batch definition say what
+    data to check, a validation definition pairs that data with a suite, and a
+    checkpoint runs the validation and then its actions (here, update Data Docs).
 
-        self.context_root_dir = context_root_dir
-        self.context = None
-        self._initialize_context()
+    Returns
+    -------
+    great_expectations.core.ExpectationSuiteValidationResult
+        The result; ``result.success`` is True when every rule passed.
+    """
+    name = suite.name
+    data_source = context.data_sources.add_or_update_pandas(name="rossmann")
+    batch_definition = data_source.add_dataframe_asset(
+        name=name
+    ).add_batch_definition_whole_dataframe(name=f"{name}_batch")
 
-    def _initialize_context(self):
-        """Initialize or load Great Expectations context."""
-        if not GX_AVAILABLE:
-            return
-
-        try:
-            # Try to load existing context
-            self.context = gx.get_context(context_root_dir=str(self.context_root_dir))
-            print(f"✓ Loaded existing GX context from {self.context_root_dir}")
-        except Exception as e:
-            print(f"Warning: Could not load GX context: {e}")
-            print("Validation will be skipped.")
-            self.context = None
-
-    def validate_raw_train_data(self, file_path: Path) -> dict:
-        """Validate raw training data (train.csv).
-
-        Args:
-            file_path: Path to train.csv
-
-        Returns:
-            Validation results dictionary
-        """
-        if not GX_AVAILABLE or self.context is None:
-            return self._skip_validation("raw_train")
-
-        print(f"\n{'=' * 60}")
-        print(f"Validating raw training data: {file_path}")
-        print(f"{'=' * 60}\n")
-
-        # Load data
-        df = pd.read_csv(file_path)
-
-        # Create runtime batch
-        batch_request = RuntimeBatchRequest(
-            datasource_name="rossmann_datasource",
-            data_connector_name="raw_data_connector",
-            data_asset_name="train_raw",
-            runtime_parameters={"batch_data": df},
-            batch_identifiers={"file_name": "train.csv"},
+    suite = context.suites.add_or_update(suite)
+    validation = context.validation_definitions.add_or_update(
+        gx.ValidationDefinition(name=f"{name}_validation", data=batch_definition, suite=suite)
+    )
+    checkpoint = context.checkpoints.add_or_update(
+        gx.Checkpoint(
+            name=f"{name}_checkpoint",
+            validation_definitions=[validation],
+            actions=[gx.checkpoint.UpdateDataDocsAction(name="update_data_docs")],
+            result_format="SUMMARY",
         )
+    )
+    checkpoint_result = checkpoint.run(batch_parameters={"dataframe": df})
+    return next(iter(checkpoint_result.run_results.values()))
 
-        # Run validation
-        results = self._run_validation(
-            batch_request=batch_request,
-            expectation_suite_name="raw_train_suite",
-            checkpoint_name="raw_train_checkpoint",
+
+def describe_failures(result) -> list[str]:
+    """Return one plain-language line per failed rule."""
+    lines = []
+    for check in result.results:
+        if check.success:
+            continue
+        config = check.expectation_config
+        column = config.kwargs.get("column")
+        target = f" on {column}" if column else ""
+        line = f"{config.type}{target}"
+
+        details = check.result or {}
+        count = details.get("unexpected_count")
+        if count:
+            examples = details.get("partial_unexpected_list", [])[:5]
+            rows = "row" if count == 1 else "rows"
+            line += f": {count:,} {rows} failed, for example {examples}"
+        elif "observed_value" in details:
+            line += f": found {details['observed_value']}"
+
+        note = config.notes
+        if note:
+            line += f"\n      Rule: {note}"
+        lines.append(line)
+    return lines
+
+
+def read_raw_train(path: Path = RAW_TRAIN_PATH) -> pd.DataFrame:
+    """Read train.csv. StateHoliday mixes 0 and "0" in the file, so read it as text."""
+    return pd.read_csv(path, dtype={"StateHoliday": str})
+
+
+def validate_raw(context, train_path: Path = RAW_TRAIN_PATH, store_path: Path = RAW_STORE_PATH):
+    """Validate store.csv and train.csv. Returns {suite name: result}."""
+    store = pd.read_csv(store_path)
+    train = read_raw_train(train_path)
+    store_ids = sorted(int(s) for s in store["Store"].dropna().unique())
+    return {
+        "raw_store": run_checkpoint(context, store, raw_store_suite()),
+        "raw_train": run_checkpoint(context, train, raw_train_suite(store_ids)),
+    }
+
+
+def validate_features(context, features_path: Path = FEATURES_PATH):
+    """Validate the feature table. Returns {suite name: result}."""
+    df = pd.read_parquet(features_path)
+    return {"features": run_checkpoint(context, df, features_suite())}
+
+
+def report(results: dict) -> bool:
+    """Print a summary of the results. Returns True when every suite passed."""
+    print()
+    for name, result in results.items():
+        stats = result.statistics
+        status = "PASSED" if result.success else "FAILED"
+        print(
+            f"{name:10s} {status}  "
+            f"({stats['successful_expectations']} of {stats['evaluated_expectations']} rules passed)"
         )
-
-        return results
-
-    def validate_raw_store_data(self, file_path: Path) -> dict:
-        """Validate raw store data (store.csv).
-
-        Args:
-            file_path: Path to store.csv
-
-        Returns:
-            Validation results dictionary
-        """
-        if not GX_AVAILABLE or self.context is None:
-            return self._skip_validation("raw_store")
-
-        print(f"\n{'=' * 60}")
-        print(f"Validating raw store data: {file_path}")
-        print(f"{'=' * 60}\n")
-
-        # Load data
-        df = pd.read_csv(file_path)
-
-        # Create runtime batch
-        batch_request = RuntimeBatchRequest(
-            datasource_name="rossmann_datasource",
-            data_connector_name="raw_data_connector",
-            data_asset_name="store_raw",
-            runtime_parameters={"batch_data": df},
-            batch_identifiers={"file_name": "store.csv"},
-        )
-
-        # Run validation
-        results = self._run_validation(
-            batch_request=batch_request,
-            expectation_suite_name="raw_store_suite",
-            checkpoint_name="raw_store_checkpoint",
-        )
-
-        return results
-
-    def validate_processed_data(self, file_path: Path) -> dict:
-        """Validate processed/cleaned data.
-
-        Args:
-            file_path: Path to train_clean.parquet
-
-        Returns:
-            Validation results dictionary
-        """
-        if not GX_AVAILABLE or self.context is None:
-            return self._skip_validation("processed")
-
-        print(f"\n{'=' * 60}")
-        print(f"Validating processed data: {file_path}")
-        print(f"{'=' * 60}\n")
-
-        # Load data
-        df = pd.read_parquet(file_path)
-
-        # Create runtime batch
-        batch_request = RuntimeBatchRequest(
-            datasource_name="rossmann_datasource",
-            data_connector_name="processed_data_connector",
-            data_asset_name="train_clean",
-            runtime_parameters={"batch_data": df},
-            batch_identifiers={"file_name": "train_clean.parquet"},
-        )
-
-        # Run validation
-        results = self._run_validation(
-            batch_request=batch_request,
-            expectation_suite_name="processed_data_suite",
-            checkpoint_name="processed_data_checkpoint",
-        )
-
-        return results
-
-    def validate_features(self, file_path: Path) -> dict:
-        """Validate feature-engineered data.
-
-        Args:
-            file_path: Path to train_features.parquet
-
-        Returns:
-            Validation results dictionary
-        """
-        if not GX_AVAILABLE or self.context is None:
-            return self._skip_validation("features")
-
-        print(f"\n{'=' * 60}")
-        print(f"Validating feature data: {file_path}")
-        print(f"{'=' * 60}\n")
-
-        # Load data
-        df = pd.read_parquet(file_path)
-
-        # Create runtime batch
-        batch_request = RuntimeBatchRequest(
-            datasource_name="rossmann_datasource",
-            data_connector_name="processed_data_connector",
-            data_asset_name="train_features",
-            runtime_parameters={"batch_data": df},
-            batch_identifiers={"file_name": "train_features.parquet"},
-        )
-
-        # Run validation
-        results = self._run_validation(
-            batch_request=batch_request,
-            expectation_suite_name="features_suite",
-            checkpoint_name="features_checkpoint",
-        )
-
-        return results
-
-    def _run_validation(
-        self, batch_request: RuntimeBatchRequest, expectation_suite_name: str, checkpoint_name: str
-    ) -> dict:
-        """Run validation using a checkpoint.
-
-        Args:
-            batch_request: Runtime batch request
-            expectation_suite_name: Name of expectation suite
-            checkpoint_name: Name of checkpoint
-
-        Returns:
-            Validation results
-        """
-        try:
-            # Get validator using batch_request
-            validator = self.context.get_validator(
-                batch_request=batch_request,
-                expectation_suite_name=expectation_suite_name,
-            )
-
-            # Run validation
-            results = validator.validate()
-
-            # Extract success status
-            success = results.success
-
-            # Print summary
-            print(f"\n{'=' * 60}")
-            print(f"Validation Results: {'✓ PASSED' if success else '✗ FAILED'}")
-            print(f"{'=' * 60}\n")
-
-            # Get statistics
-            stats = results.statistics
-
-            print(f"Total expectations: {stats['evaluated_expectations']}")
-            print(f"Successful: {stats['successful_expectations']}")
-            print(f"Failed: {stats['unsuccessful_expectations']}")
-            print(f"Success rate: {stats['success_percent']:.1f}%\n")
-
-            # If there are failures, show which ones failed
-            if not success:
-                print("Failed Expectations:")
-                for result in results.results:
-                    if not result.success:
-                        exp_type = result.expectation_config.expectation_type
-                        kwargs = result.expectation_config.kwargs
-                        print(f"  ✗ {exp_type}")
-                        if "column" in kwargs:
-                            print(f"    Column: {kwargs['column']}")
-                        if "value_set" in kwargs:
-                            print(f"    Expected values: {kwargs['value_set']}")
-                        if "min_value" in kwargs or "max_value" in kwargs:
-                            print(
-                                f"    Expected range: [{kwargs.get('min_value', 'N/A')}, {kwargs.get('max_value', 'N/A')}]"
-                            )
-                        if hasattr(result, "result") and "observed_value" in result.result:
-                            print(f"    Observed: {result.result['observed_value']}")
-                        print()
-
-            return {
-                "success": success,
-                "statistics": stats,
-                "checkpoint_name": checkpoint_name,
-            }
-
-        except Exception as e:
-            print(f"✗ Validation failed with error: {e}")
-            return {
-                "success": False,
-                "error": str(e),
-                "checkpoint_name": checkpoint_name,
-            }
-
-    def _skip_validation(self, stage: str) -> dict:
-        """Return skip result when GX is not available."""
-        print(f"⊗ Skipping {stage} validation (Great Expectations not configured)")
-        return {
-            "success": True,
-            "skipped": True,
-            "stage": stage,
-        }
+        for line in describe_failures(result):
+            print(f"  ✗ {line}")
+    print(f"\nData Docs: {DATA_DOCS_PATH}")
+    return all(result.success for result in results.values())
 
 
-def main():
-    """CLI entry point for data validation."""
+def main(argv: list[str] | None = None) -> int:
+    """Run the requested validation stage. Returns the exit code (0 = passed, 1 = failed)."""
     parser = argparse.ArgumentParser(description="Validate data with Great Expectations")
     parser.add_argument(
         "--stage",
-        choices=["raw", "processed", "features", "all"],
+        choices=["raw", "features", "all"],
         default="all",
-        help="Which data stage to validate",
+        help="Which data to validate (default: all)",
     )
-    parser.add_argument(
-        "--fail-on-error", action="store_true", help="Exit with error code if validation fails"
-    )
+    args = parser.parse_args(argv)
 
-    args = parser.parse_args()
+    context = get_context()
+    results = {}
+    if args.stage in ("raw", "all"):
+        results.update(validate_raw(context, RAW_TRAIN_PATH, RAW_STORE_PATH))
+    if args.stage in ("features", "all"):
+        results.update(validate_features(context, FEATURES_PATH))
 
-    # Initialize validator
-    validator = DataValidator()
-
-    # Define data paths
-    project_root = Path(__file__).parents[2]
-    raw_train = project_root / "data" / "raw" / "train.csv"
-    raw_store = project_root / "data" / "raw" / "store.csv"
-    processed = project_root / "data" / "processed" / "train_clean.parquet"
-    features = project_root / "data" / "processed" / "train_features.parquet"
-
-    # Run validations based on stage
-    all_results = {}
-
-    if args.stage in ["raw", "all"]:
-        if raw_train.exists():
-            all_results["raw_train"] = validator.validate_raw_train_data(raw_train)
-        else:
-            print(f"⊗ Skipping raw train validation (file not found: {raw_train})")
-
-        if raw_store.exists():
-            all_results["raw_store"] = validator.validate_raw_store_data(raw_store)
-        else:
-            print(f"⊗ Skipping raw store validation (file not found: {raw_store})")
-
-    if args.stage in ["processed", "all"]:
-        if processed.exists():
-            all_results["processed"] = validator.validate_processed_data(processed)
-        else:
-            print(f"⊗ Skipping processed validation (file not found: {processed})")
-
-    if args.stage in ["features", "all"]:
-        if features.exists():
-            all_results["features"] = validator.validate_features(features)
-        else:
-            print(f"⊗ Skipping features validation (file not found: {features})")
-
-    # Print summary
-    print(f"\n{'=' * 60}")
-    print("VALIDATION SUMMARY")
-    print(f"{'=' * 60}\n")
-
-    all_passed = all(result.get("success", False) for result in all_results.values())
-
-    for stage, result in all_results.items():
-        status = "✓ PASSED" if result.get("success") else "✗ FAILED"
-        skipped = " (skipped)" if result.get("skipped") else ""
-        print(f"{stage:20s}: {status}{skipped}")
-
-    print(f"\n{'=' * 60}\n")
-
-    # Exit with error if requested and validation failed
-    if args.fail_on_error and not all_passed:
-        print("✗ Validation failed. Exiting with error code.")
-        sys.exit(1)
-
-    print("✓ Validation complete.")
-    sys.exit(0)
+    if report(results):
+        print("\n✓ All data checks passed.")
+        return 0
+    print("\n✗ Data checks failed. Fix the data before running the next pipeline step.")
+    return 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

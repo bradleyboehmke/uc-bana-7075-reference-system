@@ -6,7 +6,7 @@ The **reference system** for BANA 7075, ML System Design for Business (Universit
 
 It is a simplified copy of [rossmann-forecasting](https://github.com/bradleyboehmke/rossmann-forecasting) (imported at `9553f37` without history). The subject of the course is the system around the model, not the model. This repository is also a GitHub template: student teams create their project repositories from it.
 
-**Status:** being rebuilt in Phase 1 of the course redesign. REF-04 is done: one LightGBM model with fixed hyperparameters and 12 features listed in `config/params.yaml`. The rest still reflects the original Rossmann project (Great Expectations 0.x, DVC with a local remote) until the remaining Phase 1 tasks land. Work is tracked in [issue #1](https://github.com/bradleyboehmke/uc-bana-7075-reference-system/issues/1).
+**Status:** being rebuilt in Phase 1 of the course redesign. REF-04 is done: one LightGBM model with fixed hyperparameters and 12 features listed in `config/params.yaml`. REF-05 is done: Great Expectations 1.x, with the rules in `src/data/expectations.py`. The rest still reflects the original Rossmann project (DVC with a local remote) until the remaining Phase 1 tasks land. Work is tracked in [issue #1](https://github.com/bradleyboehmke/uc-bana-7075-reference-system/issues/1).
 
 ## Where the plan lives
 
@@ -52,10 +52,11 @@ uv pip install -e ".[dev]"
 # Tests
 pytest -v
 
-# Data pipeline
-python -m src.data.make_dataset
+# Data pipeline (validation exits 1 on any failed rule; Data Docs at gx/uncommitted/data_docs/local_site/index.html)
 python src/data/validate_data.py --stage raw
+python -m src.data.make_dataset
 python -m src.features.build_features
+python src/data/validate_data.py --stage features
 
 # Model: train and register (seconds), validate and promote, batch predict
 python -m src.models.train
@@ -75,4 +76,5 @@ python src/monitoring/generate_reports.py --days 7
 
 - The docs workflow (`.github/workflows/docs.yml`) fails because unpinned mkdocstrings versions conflict. REF-08 fixes it; students do not use the MkDocs site.
 - Unpinned `mlflow>=2.8.0` currently installs MLflow 3.x, which refuses the `./mlruns` file store unless `MLFLOW_ALLOW_FILE_STORE=true` is set. Set it locally until REF-08 pins versions (or moves tracking to SQLite). Tests use a temporary SQLite store and are unaffected.
+- `gx/` is Great Expectations' working folder. It is generated and gitignored, because GE rewrites its config with new IDs on every run. Change validation rules in `src/data/expectations.py`, never in `gx/`. If you change the raw data (for example, the store sample), update the row-count rules there.
 - This file is written for developing the system. Before launch, REF-09 adds student-facing documentation, and this file should be revisited so student teams that create repositories from the template get guidance suited to them.

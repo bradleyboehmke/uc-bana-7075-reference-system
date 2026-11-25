@@ -76,11 +76,12 @@ ______________________________________________________________________
 
 ### Data Validation (Great Expectations)
 
-Great Expectations provides automated data quality checks at three critical stages:
+Great Expectations provides automated data quality checks at two points:
 
-- **Raw data validation** - Catches schema changes, missing values, invalid ranges
-- **Processed data validation** - Ensures cleaning didn't introduce errors
-- **Feature validation** - Verifies feature engineering correctness
+- **Raw data validation** - Catches schema changes, missing values, invalid ranges, and unknown stores as data arrives
+- **Feature validation** - Checks that every model feature is present and filled in just before training
+
+The rules are in `src/data/expectations.py`. A failed check stops the pipeline.
 
 **Benefits:**
 
@@ -126,11 +127,10 @@ Run the complete DataOps pipeline in one command:
 bash scripts/dataops_workflow.sh
 ```
 
-This executes all six pipeline steps:
+This executes the pipeline steps in order:
 
 1. Validate raw data
 1. Process and clean
-1. Validate processed data
 1. Build features
 1. Validate features
 1. Version with DVC
@@ -141,20 +141,16 @@ This executes all six pipeline steps:
 ============================================================
 Step 1: Validating raw data...
 ============================================================
-✓ PASSED (13/13 expectations)
+raw_store  PASSED  (8 of 8 rules passed)
+raw_train  PASSED  (14 of 14 rules passed)
 
 ============================================================
 Step 2: Processing raw data...
 ============================================================
-✓ Processed 1,017,209 records
+✓ Processed 91,992 records
 ✓ Saved to: data/processed/train_clean.parquet
 
-============================================================
-Step 3: Validating processed data...
-============================================================
-✓ PASSED (15/15 expectations)
-
-... (continues through Step 6)
+... (continues through the remaining steps)
 ```
 
 ______________________________________________________________________

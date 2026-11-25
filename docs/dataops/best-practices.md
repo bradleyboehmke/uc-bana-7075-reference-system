@@ -215,7 +215,7 @@ ______________________________________________________________________
 | **Missing value strategy**  | Inline code comments + docstrings |
 | **Feature transformations** | Function docstrings               |
 | **Business logic**          | CLAUDE.md or README               |
-| **Validation rules**        | Great Expectations metadata       |
+| **Validation rules**        | `notes` on each rule in `src/data/expectations.py` |
 
 ### Example
 
@@ -377,14 +377,17 @@ ______________________________________________________________________
 **Diagnosis:**
 
 ```bash
-# Review detailed validation results
-cat great_expectations/uncommitted/validations/latest.json
+# Rerun to see each failed rule, example values, and the reason for the rule
+python src/data/validate_data.py --stage raw
+
+# Or open the Data Docs report in a browser
+open gx/uncommitted/data_docs/local_site/index.html
 ```
 
 **Solutions:**
 
 1. **Fix data at source** (preferred)
-1. **Update expectations** (if assumptions changed)
+1. **Update the rule in `src/data/expectations.py`** (if assumptions changed), and say why in its note
 1. **Add data cleaning** (if pattern is expected)
 
 ### Issue: Feature engineering creates NaN values
@@ -454,7 +457,7 @@ Use this checklist to ensure your DataOps pipeline is production-ready:
 
 - [ ] README explains pipeline purpose
 - [ ] Inline comments explain data decisions
-- [ ] Expectations documented in Great Expectations
+- [ ] Every validation rule has a note explaining why it exists
 
 ______________________________________________________________________
 

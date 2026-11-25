@@ -78,19 +78,8 @@ rossmann-forecasting/
 │       ├── models.md
 │       ├── evaluation.md
 │       └── monitoring.md
-├── great_expectations/         # Great Expectations configuration
-│   ├── great_expectations.yml  # Main GX config
-│   ├── expectations/           # Expectation suites (validation rules)
-│   │   ├── raw_train_suite.json
-│   │   ├── raw_store_suite.json
-│   │   ├── processed_data_suite.json
-│   │   └── features_suite.json
-│   ├── checkpoints/            # Validation checkpoints
-│   │   ├── raw_data_checkpoint.yml
-│   │   ├── processed_data_checkpoint.yml
-│   │   └── features_checkpoint.yml
-│   └── uncommitted/            # Validation results (NOT in git)
-│       └── validations/
+├── gx/                         # Great Expectations working folder (NOT in git)
+│   └── uncommitted/data_docs/  # Data Docs report, created by validate_data.py
 ├── mlruns/                     # MLflow tracking data (NOT in git)
 │   └── 0/
 │       └── <experiment-runs>/
@@ -113,7 +102,8 @@ rossmann-forecasting/
 │   ├── data/
 │   │   ├── __init__.py
 │   │   ├── make_dataset.py     # Load and clean raw data
-│   │   └── validate_data.py    # Great Expectations validation
+│   │   ├── expectations.py     # Validation rules (Great Expectations suites)
+│   │   └── validate_data.py    # Run the validation rules
 │   ├── features/
 │   │   ├── __init__.py
 │   │   └── build_features.py   # Feature engineering pipeline
@@ -167,7 +157,8 @@ ______________________________________________________________________
 **Data processing and validation**
 
 - **`make_dataset.py`**: Loads raw CSV files, merges store metadata, performs basic cleaning, saves to parquet
-- **`validate_data.py`**: Great Expectations validation at each stage (raw, processed, features)
+- **`expectations.py`**: The validation rules, as three Great Expectations suites (raw train, raw store, features)
+- **`validate_data.py`**: Runs the rules on the raw data or the features, updates Data Docs, and exits with code 1 if any rule fails
 
 ### `src/features/`
 

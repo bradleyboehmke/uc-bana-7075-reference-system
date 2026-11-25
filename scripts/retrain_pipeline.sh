@@ -91,14 +91,13 @@ fi
 # Validate data (basic checks)
 echo -e "${GREEN}✓ Found processed data: data/processed/train_features.parquet${NC}"
 
-# Optional: Run data validation script if available
-if [ -f "src/data/validate_data.py" ]; then
-    echo -e "Running data quality checks..."
-    python src/data/validate_data.py --stage processed || {
-        echo -e "${YELLOW}Warning: Data validation checks failed${NC}"
-        echo -e "${YELLOW}Continuing anyway, but review data quality${NC}"
-    }
-fi
+# Check the features before training; stop if any rule fails
+echo -e "Running data quality checks..."
+python src/data/validate_data.py --stage features || {
+    echo -e "${RED}Error: Feature validation failed; not retraining on bad data${NC}"
+    echo -e "${YELLOW}See gx/uncommitted/data_docs/local_site/index.html for details${NC}"
+    exit 1
+}
 
 ################################################################################
 # Step 2: Model Training

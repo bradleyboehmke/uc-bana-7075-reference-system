@@ -25,7 +25,7 @@ dependencies = [
 
     # DataOps - Data versioning and validation
     "dvc>=3.0.0",
-    "great-expectations>=0.18.0,<1.0.0",  # Pin to 0.x for compatibility with config
+    "great-expectations==1.25.0",
 
     # Deployment
     "fastapi>=0.104.0",

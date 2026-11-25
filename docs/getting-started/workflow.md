@@ -76,21 +76,18 @@ bash scripts/dataops_workflow.sh
 
 ```bash
 # Step 1: Validate raw data
-python src/data/validate_data.py --stage raw --fail-on-error
+python src/data/validate_data.py --stage raw
 
 # Step 2: Process and clean data
 python -m src.data.make_dataset
 
-# Step 3: Validate processed data
-python src/data/validate_data.py --stage processed --fail-on-error
-
-# Step 4: Engineer features
+# Step 3: Engineer features
 python -m src.features.build_features
 
-# Step 5: Validate features
-python src/data/validate_data.py --stage features --fail-on-error
+# Step 4: Validate features
+python src/data/validate_data.py --stage features
 
-# Step 6: Version with DVC
+# Step 5: Version with DVC
 dvc add data/processed/train_clean.parquet
 dvc add data/processed/train_features.parquet
 git add data/processed/*.dvc .gitignore

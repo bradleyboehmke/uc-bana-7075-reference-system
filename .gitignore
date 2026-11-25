@@ -48,9 +48,9 @@ outputs/
 .dvc/tmp
 .dvc/config.local
 
-# Great Expectations
-great_expectations/uncommitted/
-great_expectations/.ge_store_backend_id
+# Great Expectations: created by src/data/validate_data.py on each run
+# (suites come from src/data/expectations.py; Data Docs land in gx/uncommitted/)
+gx/
 
 # MLflow
 mlruns/
