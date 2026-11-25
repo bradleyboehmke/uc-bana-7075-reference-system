@@ -18,33 +18,33 @@ ______________________________________________________________________
 ### Run This Step
 
 ```bash
-python src/data/validate_data.py --stage raw --fail-on-error
+python src/data/validate_data.py --stage raw
 ```
 
 ### What It Validates
 
-- ✅ Expected columns present (`Store`, `Date`, `Sales`, etc.)
-- ✅ Data types correct (dates are datetime, sales are numeric)
-- ✅ Value ranges valid (sales ≥ 0, stores in expected range)
-- ✅ Cardinality checks (reasonable number of stores, dates)
-- ✅ Critical fields non-null
+- ✅ Expected columns present, in order (`Store`, `Date`, `Sales`, etc.)
+- ✅ Value ranges valid (sales between 0 and 50,000, days of the week 1–7)
+- ✅ Row counts as expected (100 stores; 50,000–150,000 daily sales rows)
+- ✅ Every sale belongs to a store in store.csv, and each store appears once
+- ✅ Critical fields non-null; dates written as YYYY-MM-DD
+
+The rules are in `src/data/expectations.py`; see [Data Validation](validation.md) for the full list.
 
 ### Success Output
 
 ```
-============================================================
-Validating raw training data: data/raw/train.csv
-============================================================
-✓ PASSED
-Total expectations: 13
-Successful: 13
-Failed: 0
-Success rate: 100.0%
+raw_store  PASSED  (8 of 8 rules passed)
+raw_train  PASSED  (14 of 14 rules passed)
+
+Data Docs: gx/uncommitted/data_docs/local_site/index.html
+
+✓ All data checks passed.
 ```
 
 ### Failure Handling
 
-If validation fails, the script exits with an error code, preventing the pipeline from continuing. This is intentional—**bad data should stop the pipeline**, not be silently processed.
+If validation fails, the script lists each failed rule and why it exists, then exits with code 1, preventing the pipeline from continuing. This is intentional—**bad data should stop the pipeline**, not be silently processed.
 
 ______________________________________________________________________
 
@@ -67,8 +67,8 @@ python -m src.data.make_dataset
 
 ### What It Does
 
-1. Loads `data/raw/train.csv` (1M+ rows of daily sales)
-1. Loads `data/raw/store.csv` (1,115 store metadata records)
+1. Loads `data/raw/train.csv` (91,992 rows of daily sales)
+1. Loads `data/raw/store.csv` (100 store metadata records)
 1. Merges on `Store` column (left join preserves all sales records)
 1. Converts `Date` to datetime, `StateHoliday` to category, etc.
 1. Fills missing `CompetitionDistance` with median
@@ -98,34 +98,7 @@ print(f'✓ Stores: {df.Store.nunique()}')
 
 ______________________________________________________________________
 
-## Step 3: Validate Processed Data
-
-**Purpose:** Confirm that processing was successful and the cleaned data maintains quality standards. This catches:
-
-- Processing bugs (e.g., merge duplicates rows)
-- Type conversion errors
-- Unexpected nulls introduced during processing
-- Data loss (e.g., rows accidentally filtered)
-
-**Why This Matters:** Even well-tested code can fail in unexpected ways. Post-processing validation acts as a **safety net** to catch issues before features are engineered.
-
-### Run This Step
-
-```bash
-python src/data/validate_data.py --stage processed --fail-on-error
-```
-
-### What It Validates
-
-- ✅ All columns from raw data preserved (plus merge additions)
-- ✅ No unexpected nulls in critical columns
-- ✅ Date range is reasonable
-- ✅ Store counts match expectations
-- ✅ Sales values are non-negative
-
-______________________________________________________________________
-
-## Step 4: Build Standard Features
+## Step 3: Build Standard Features
 
 **Purpose:** Create **proven, standard features** that are always useful for Rossmann forecasting models. These are features that have been validated across multiple modeling efforts and should be consistently available.
 
@@ -166,7 +139,7 @@ Features must be known before the day being predicted. A feature computed from t
 
 ______________________________________________________________________
 
-## Step 5: Validate Features
+## Step 4: Validate Features
 
 **Purpose:** Ensure feature engineering didn't introduce bugs, nulls, or invalid values.
 
@@ -179,12 +152,14 @@ ______________________________________________________________________
 ### Run This Step
 
 ```bash
-python src/data/validate_data.py --stage features --fail-on-error
+python src/data/validate_data.py --stage features
 ```
+
+The features suite reads the model's feature list from `config/params.yaml` and checks that each feature is present and has no blank values.
 
 ______________________________________________________________________
 
-## Step 6: Version Control with DVC
+## Step 5: Version Control with DVC
 
 **Purpose:** Track data artifacts (processed data, features) separately from code, enabling:
 
@@ -239,14 +214,14 @@ ______________________________________________________________________
 
 ## Complete Pipeline Diagram
 
-The diagram below shows how **data assets**, **Python scripts**, **validation suites**, and **DVC versioning** work together across Steps 1-6:
+The diagram below shows how **data assets**, **Python scripts**, **validation suites**, and **DVC versioning** work together across Steps 1-5:
 
 ```mermaid
 flowchart TB
     subgraph Step1["📍 Step 1: Validate Raw Data"]
         direction LR
         R1[📁 data/raw/<br/>train.csv + store.csv]
-        GX1[📋 GX Suite:<br/>raw_data]
+        GX1[📋 GX suites:<br/>raw_train, raw_store]
         V1[🐍 validate_data.py<br/>--stage raw]
         R1 --> V1
         GX1 -.expectations.-> V1
@@ -264,36 +239,26 @@ flowchart TB
 
     OUT1 --> Step3
 
-    subgraph Step3["📍 Step 3: Validate Processed Data"]
-        direction LR
-        GX2[📋 GX Suite:<br/>processed_data]
-        V2[🐍 validate_data.py<br/>--stage processed]
-        GX2 -.expectations.-> V2
-    end
-
-    V2 -->|✅ PASS| Step4
-    V2 -->|❌ FAIL| Stop2[❌ STOP PIPELINE]
-
-    subgraph Step4["📍 Step 4: Build Features"]
+    subgraph Step3["📍 Step 3: Build Features"]
         direction LR
         F1[🐍 build_features.py<br/>calendar + promo]
         OUT2[📁 data/processed/<br/>train_features.parquet]
         F1 --> OUT2
     end
 
-    OUT2 --> Step5
+    OUT2 --> Step4
 
-    subgraph Step5["📍 Step 5: Validate Features"]
+    subgraph Step4["📍 Step 4: Validate Features"]
         direction LR
-        GX3[📋 GX Suite:<br/>features]
+        GX3[📋 GX suite:<br/>features]
         V3[🐍 validate_data.py<br/>--stage features]
         GX3 -.expectations.-> V3
     end
 
-    V3 -->|✅ PASS| Step6
+    V3 -->|✅ PASS| Step5
     V3 -->|❌ FAIL| Stop3[❌ STOP PIPELINE]
 
-    subgraph Step6["📍 Step 6: Version with DVC"]
+    subgraph Step5["📍 Step 5: Version with DVC"]
         direction LR
         DVC1[⚙️ dvc add<br/>both parquet files]
         META1[📄 *.dvc metadata<br/>tracked in Git]
@@ -302,16 +267,14 @@ flowchart TB
         DVC1 --> CACHE1
     end
 
-    Step6 --> Success[✅ Pipeline Complete<br/>Ready for ModelOps]
+    Step5 --> Success[✅ Pipeline Complete<br/>Ready for ModelOps]
 
     style Stop1 fill:#ffebee,stroke:#c62828,stroke-width:3px
-    style Stop2 fill:#ffebee,stroke:#c62828,stroke-width:3px
     style Stop3 fill:#ffebee,stroke:#c62828,stroke-width:3px
     style R1 fill:#e3f2fd
     style OUT1 fill:#e8f5e9
     style OUT2 fill:#e8f5e9
     style GX1 fill:#f3e5f5
-    style GX2 fill:#f3e5f5
     style GX3 fill:#f3e5f5
     style META1 fill:#fce4ec
     style CACHE1 fill:#f1f8e9
@@ -321,17 +284,15 @@ flowchart TB
     style Step3 fill:#f5f5f5
     style Step4 fill:#f5f5f5
     style Step5 fill:#f5f5f5
-    style Step6 fill:#f5f5f5
 ```
 
 **How the Pipeline Flows:**
 
-1. **Step 1**: Raw CSV files are validated against Great Expectations suite → PASS/FAIL gate
+1. **Step 1**: Raw CSV files are validated against two Great Expectations suites → PASS/FAIL gate
 1. **Step 2**: Processing script reads raw files, merges, cleans, outputs parquet
-1. **Step 3**: Processed data validated against GX suite → PASS/FAIL gate
-1. **Step 4**: Feature engineering script reads processed data, creates features
-1. **Step 5**: Features validated against GX suite → PASS/FAIL gate
-1. **Step 6**: DVC versions both processed files, creates `.dvc` metadata (Git) and caches data
+1. **Step 3**: Feature engineering script reads processed data, creates features
+1. **Step 4**: Features validated against a GX suite → PASS/FAIL gate
+1. **Step 5**: DVC versions both processed files, creates `.dvc` metadata (Git) and caches data
 
 **Legend:**
 

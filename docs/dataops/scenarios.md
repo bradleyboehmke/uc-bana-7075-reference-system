@@ -102,17 +102,13 @@ bash scripts/dataops_workflow.sh
 ============================================================
 Step 1: Validating raw data...
 ============================================================
-❌ FAILED
-Total expectations: 13
-Successful: 11
-Failed: 2
+raw_store  PASSED  (8 of 8 rules passed)
+raw_train  FAILED  (10 of 14 rules passed)
+  ✗ expect_table_columns_to_match_ordered_list: found ['DayOfWeek', 'Date', 'Sales', 'Customers', ...]
+      Rule: The file has the columns the pipeline reads, in the expected order.
+  ...
 
-Failed expectations:
-  ❌ expect_table_columns_to_match_set
-     - Missing required column: Store
-     - Found columns: [Date, Sales, Customers, ...]
-
-Pipeline STOPPED at validation gate.
+✗ Data checks failed. Fix the data before running the next pipeline step.
 Exit code: 1
 ```
 
@@ -148,18 +144,12 @@ bash scripts/dataops_workflow.sh
 ============================================================
 Step 1: Validating raw data...
 ============================================================
-⚠️  WARNING
-Total expectations: 13
-Successful: 12
-Failed: 1
+raw_store  PASSED  (8 of 8 rules passed)
+raw_train  FAILED  (13 of 14 rules passed)
+  ✗ expect_column_values_to_be_between on Sales: 3 rows failed, for example [125000, 110000, 150000]
+      Rule: Daily sales are never negative and no store sells over 50,000 a day.
 
-Failed expectations:
-  ❌ expect_column_values_to_be_between (Sales)
-     - Found 3 values outside expected range [0, 1000000]
-     - Outliers: [1,250,000, 1,100,000, 1,500,000]
-     - Possible cause: Holiday sales spike or data error
-
-Recommend manual review before proceeding.
+✗ Data checks failed. Fix the data before running the next pipeline step.
 ```
 
 **Response Options:**
@@ -171,18 +161,19 @@ Recommend manual review before proceeding.
     python -c "
     import pandas as pd
     df = pd.read_csv('data/raw/train.csv')
-    print(df[df['Sales'] > 1000000])
+    print(df[df['Sales'] > 50000])
     "
     ```
 
-1. **Update expectations** (if legitimate)
+1. **Update the rule** (if legitimate)
 
     ```python
-    # If Black Friday sales spike is real
-    validator.expect_column_values_to_be_between(
+    # In src/data/expectations.py, if the spike is real (say why in the note)
+    gxe.ExpectColumnValuesToBeBetween(
         column="Sales",
         min_value=0,
-        max_value=2000000  # Increased limit
+        max_value=200_000,
+        notes="Raised from 50,000: holiday sales can exceed it.",
     )
     ```
 
@@ -190,7 +181,7 @@ Recommend manual review before proceeding.
 
     ```python
     # In make_dataset.py
-    df["Sales"] = df["Sales"].clip(upper=1000000)
+    df["Sales"] = df["Sales"].clip(upper=50000)
     ```
 
 ______________________________________________________________________

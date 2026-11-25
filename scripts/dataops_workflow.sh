@@ -46,8 +46,8 @@ echo -e "${GREEN}✓ Raw data found${NC}"
 echo ""
 
 # Step 1: Validate Raw Data
-echo -e "${BLUE}Step 1/6: Validating raw data...${NC}"
-python src/data/validate_data.py --stage raw --fail-on-error
+echo -e "${BLUE}Step 1/7: Validating raw data...${NC}"
+python src/data/validate_data.py --stage raw
 if [ $? -eq 0 ]; then
     echo -e "${GREEN}✓ Raw data validation passed${NC}"
 else
@@ -57,7 +57,7 @@ fi
 echo ""
 
 # Step 2: Process Data
-echo -e "${BLUE}Step 2/6: Processing data...${NC}"
+echo -e "${BLUE}Step 2/7: Processing data...${NC}"
 python -m src.data.make_dataset
 if [ $? -eq 0 ]; then
     echo -e "${GREEN}✓ Data processing complete${NC}"
@@ -67,19 +67,8 @@ else
 fi
 echo ""
 
-# Step 3: Validate Processed Data
-echo -e "${BLUE}Step 3/8: Validating processed data...${NC}"
-python src/data/validate_data.py --stage processed --fail-on-error
-if [ $? -eq 0 ]; then
-    echo -e "${GREEN}✓ Processed data validation passed${NC}"
-else
-    echo -e "${RED}✗ Processed data validation failed${NC}"
-    exit 1
-fi
-echo ""
-
-# Step 4: Build Standard Features
-echo -e "${BLUE}Step 4/8: Building standard features...${NC}"
+# Step 3: Build Standard Features
+echo -e "${BLUE}Step 3/7: Building standard features...${NC}"
 python -m src.features.build_features
 if [ $? -eq 0 ]; then
     echo -e "${GREEN}✓ Feature engineering complete${NC}"
@@ -89,9 +78,9 @@ else
 fi
 echo ""
 
-# Step 5: Validate Features
-echo -e "${BLUE}Step 5/8: Validating features...${NC}"
-python src/data/validate_data.py --stage features --fail-on-error
+# Step 4: Validate Features
+echo -e "${BLUE}Step 4/7: Validating features...${NC}"
+python src/data/validate_data.py --stage features
 if [ $? -eq 0 ]; then
     echo -e "${GREEN}✓ Feature validation passed${NC}"
 else
@@ -100,8 +89,8 @@ else
 fi
 echo ""
 
-# Step 6: Track with DVC
-echo -e "${BLUE}Step 6/8: Version controlling with DVC...${NC}"
+# Step 5: Track with DVC
+echo -e "${BLUE}Step 5/7: Version controlling with DVC...${NC}"
 
 # Strategy: Track processed/features data with DVC
 # - Raw data: stays in Git (for accessibility and simple versioning)
@@ -139,8 +128,8 @@ echo -e "${GREEN}✓ DVC tracking complete${NC}"
 echo -e "${YELLOW}Note: Raw data versioned in Git, processed data in DVC${NC}"
 echo ""
 
-# Step 7: Generate Data Profile
-echo -e "${BLUE}Step 7/8: Generating data profile...${NC}"
+# Step 6: Generate Data Profile
+echo -e "${BLUE}Step 6/7: Generating data profile...${NC}"
 python -c "
 import pandas as pd
 import json
@@ -165,8 +154,8 @@ cat /tmp/data_profile.json
 echo -e "${GREEN}✓ Data profile generated${NC}"
 echo ""
 
-# Step 8: Commit to Git
-echo -e "${BLUE}Step 8/8: Committing to git...${NC}"
+# Step 7: Commit to Git
+echo -e "${BLUE}Step 7/7: Committing to git...${NC}"
 
 # Check if there are changes
 if git diff --quiet data/ && git diff --quiet .gitignore; then

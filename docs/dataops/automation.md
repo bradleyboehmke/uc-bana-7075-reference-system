@@ -17,10 +17,9 @@ bash scripts/dataops_workflow.sh
 
 1. ✅ Validates raw data (Step 1)
 1. 🔧 Processes raw → clean data (Step 2)
-1. ✅ Validates processed data (Step 3)
-1. 🎯 Builds standard features (Step 4)
-1. ✅ Validates features (Step 5)
-1. 💾 Versions data with DVC (Step 6)
+1. 🎯 Builds standard features (Step 3)
+1. ✅ Validates features (Step 4)
+1. 💾 Versions data with DVC (Step 5)
 
 ### Exit Behavior
 
@@ -56,7 +55,6 @@ If only `src/features/build_features.py` changed, `dvc repro` will:
 
 1. ✅ Skip raw data validation (unchanged)
 1. ✅ Skip data processing (unchanged)
-1. ✅ Skip processed validation (unchanged)
 1. ⚙️ Re-run feature engineering (code changed)
 1. ⚙️ Re-run feature validation (features changed)
 
@@ -87,10 +85,9 @@ flowchart TB
     subgraph Steps["DataOps Steps (Both Options)"]
         direction LR
         S1[1️⃣ Validate<br/>Raw] --> S2[2️⃣ Process<br/>Data]
-        S2 --> S3[3️⃣ Validate<br/>Processed]
-        S3 --> S4[4️⃣ Build<br/>Features]
-        S4 --> S5[5️⃣ Validate<br/>Features]
-        S5 --> S6[6️⃣ Version<br/>with DVC]
+        S2 --> S3[3️⃣ Build<br/>Features]
+        S3 --> S4[4️⃣ Validate<br/>Features]
+        S4 --> S5[5️⃣ Version<br/>with DVC]
     end
 
     Option1 -.orchestrates.-> Steps
@@ -178,7 +175,7 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: validation-reports
-          path: great_expectations/uncommitted/validations/
+          path: gx/uncommitted/data_docs/
 ```
 
 ### Apache Airflow Example
@@ -208,17 +205,12 @@ with DAG(
 
     validate_raw = BashOperator(
         task_id='validate_raw_data',
-        bash_command='python src/data/validate_data.py --stage raw --fail-on-error',
+        bash_command='python src/data/validate_data.py --stage raw',
     )
 
     process_data = BashOperator(
         task_id='process_data',
         bash_command='python -m src.data.make_dataset',
-    )
-
-    validate_processed = BashOperator(
-        task_id='validate_processed_data',
-        bash_command='python src/data/validate_data.py --stage processed --fail-on-error',
     )
 
     build_features = BashOperator(
@@ -228,7 +220,7 @@ with DAG(
 
     validate_features = BashOperator(
         task_id='validate_features',
-        bash_command='python src/data/validate_data.py --stage features --fail-on-error',
+        bash_command='python src/data/validate_data.py --stage features',
     )
 
     version_data = BashOperator(
@@ -241,8 +233,7 @@ with DAG(
     )
 
     # Define dependencies
-    validate_raw >> process_data >> validate_processed
-    validate_processed >> build_features >> validate_features
+    validate_raw >> process_data >> build_features >> validate_features
     validate_features >> version_data
 ```
 
