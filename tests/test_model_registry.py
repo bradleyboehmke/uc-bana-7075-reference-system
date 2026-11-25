@@ -27,95 +27,38 @@ class TestGetMLflowClient:
         assert client == mock_client_instance
 
 
-class TestRegisterEnsembleModel:
-    """Tests for register_ensemble_model()."""
+class TestRegisterModel:
+    """Tests for register_model()."""
 
-    @patch("mlflow.pyfunc.log_model")
+    @patch("src.models.model_registry.log_lightgbm_model")
     @patch("src.models.model_registry.get_mlflow_client")
-    def test_register_ensemble_model_basic(self, mock_get_client, mock_log_model):
-        """Test basic model registration without description."""
-        # Arrange
-        mock_ensemble = Mock()
-        mock_model_info = Mock()
-        mock_model_info.registered_model_version = "1"
-        mock_log_model.return_value = mock_model_info
+    def test_register_model_basic(self, mock_get_client, mock_log_model):
+        """Logs the LightGBM model and returns the new version."""
+        mock_model = Mock()
+        mock_log_model.return_value = Mock(registered_model_version=1)
 
-        # Act
-        version = model_registry.register_ensemble_model(
-            ensemble_model=mock_ensemble, model_name="rossmann-ensemble"
-        )
+        version = model_registry.register_model(mock_model, model_name="rossmann-model")
 
-        # Assert
         mock_log_model.assert_called_once_with(
-            artifact_path="ensemble_model",
-            python_model=mock_ensemble,
-            registered_model_name="rossmann-ensemble",
-            conda_env=None,
-            signature=None,
-            input_example=None,
+            mock_model, name="model", registered_model_name="rossmann-model"
         )
+        mock_get_client.return_value.update_model_version.assert_not_called()
         assert version == "1"
 
-    @patch("mlflow.pyfunc.log_model")
+    @patch("src.models.model_registry.log_lightgbm_model")
     @patch("src.models.model_registry.get_mlflow_client")
-    def test_register_ensemble_model_with_description(self, mock_get_client, mock_log_model):
-        """Test model registration with description update."""
-        # Arrange
-        mock_ensemble = Mock()
-        mock_model_info = Mock()
-        mock_model_info.registered_model_version = "2"
-        mock_log_model.return_value = mock_model_info
+    def test_register_model_with_description(self, mock_get_client, mock_log_model):
+        """Sets the version description when one is given."""
+        mock_log_model.return_value = Mock(registered_model_version="2")
 
-        mock_client = Mock()
-        mock_get_client.return_value = mock_client
-
-        # Act
-        version = model_registry.register_ensemble_model(
-            ensemble_model=mock_ensemble,
-            model_name="rossmann-ensemble",
-            description="Test description",
+        version = model_registry.register_model(
+            Mock(), model_name="rossmann-model", description="Test description"
         )
 
-        # Assert
-        mock_client.update_model_version.assert_called_once_with(
-            name="rossmann-ensemble", version="2", description="Test description"
+        mock_get_client.return_value.update_model_version.assert_called_once_with(
+            name="rossmann-model", version="2", description="Test description"
         )
         assert version == "2"
-
-    @patch("mlflow.pyfunc.log_model")
-    @patch("src.models.model_registry.get_mlflow_client")
-    def test_register_ensemble_model_with_all_params(self, mock_get_client, mock_log_model):
-        """Test model registration with all optional parameters."""
-        # Arrange
-        mock_ensemble = Mock()
-        mock_conda_env = {"python": "3.10"}
-        mock_signature = Mock()
-        mock_input_example = Mock()
-
-        mock_model_info = Mock()
-        mock_model_info.registered_model_version = "3"
-        mock_log_model.return_value = mock_model_info
-
-        # Act
-        version = model_registry.register_ensemble_model(
-            ensemble_model=mock_ensemble,
-            model_name="rossmann-ensemble",
-            conda_env=mock_conda_env,
-            signature=mock_signature,
-            input_example=mock_input_example,
-            description="Full registration test",
-        )
-
-        # Assert
-        mock_log_model.assert_called_once_with(
-            artifact_path="ensemble_model",
-            python_model=mock_ensemble,
-            registered_model_name="rossmann-ensemble",
-            conda_env=mock_conda_env,
-            signature=mock_signature,
-            input_example=mock_input_example,
-        )
-        assert version == "3"
 
 
 class TestPromoteModel:
@@ -130,14 +73,14 @@ class TestPromoteModel:
         mock_get_client.return_value = mock_client
 
         # Act
-        model_registry.promote_model(model_name="rossmann-ensemble", version="1", stage="Staging")
+        model_registry.promote_model(model_name="rossmann-model", version="1", stage="Staging")
 
         # Assert
         mock_client.get_latest_versions.assert_called_once_with(
-            "rossmann-ensemble", stages=["Staging"]
+            "rossmann-model", stages=["Staging"]
         )
         mock_client.transition_model_version_stage.assert_called_once_with(
-            name="rossmann-ensemble", version="1", stage="Staging"
+            name="rossmann-model", version="1", stage="Staging"
         )
 
     @patch("src.models.model_registry.get_mlflow_client")
@@ -154,7 +97,7 @@ class TestPromoteModel:
 
         # Act
         model_registry.promote_model(
-            model_name="rossmann-ensemble", version="7", stage="Production", archive_existing=True
+            model_name="rossmann-model", version="7", stage="Production", archive_existing=True
         )
 
         # Assert
@@ -163,10 +106,10 @@ class TestPromoteModel:
         calls = mock_client.transition_model_version_stage.call_args_list
 
         # First call: archive existing
-        assert calls[0] == call(name="rossmann-ensemble", version="5", stage="Archived")
+        assert calls[0] == call(name="rossmann-model", version="5", stage="Archived")
 
         # Second call: promote new model
-        assert calls[1] == call(name="rossmann-ensemble", version="7", stage="Production")
+        assert calls[1] == call(name="rossmann-model", version="7", stage="Production")
 
     @patch("src.models.model_registry.get_mlflow_client")
     def test_promote_model_without_archival(self, mock_get_client):
@@ -180,7 +123,7 @@ class TestPromoteModel:
 
         # Act
         model_registry.promote_model(
-            model_name="rossmann-ensemble",
+            model_name="rossmann-model",
             version="4",
             stage="Production",
             archive_existing=False,
@@ -189,7 +132,7 @@ class TestPromoteModel:
         # Assert
         # Should only promote, not archive
         mock_client.transition_model_version_stage.assert_called_once_with(
-            name="rossmann-ensemble", version="4", stage="Production"
+            name="rossmann-model", version="4", stage="Production"
         )
 
     @patch("src.models.model_registry.get_mlflow_client")
@@ -200,13 +143,13 @@ class TestPromoteModel:
         mock_get_client.return_value = mock_client
 
         # Act
-        model_registry.promote_model(model_name="rossmann-ensemble", version="2", stage="Archived")
+        model_registry.promote_model(model_name="rossmann-model", version="2", stage="Archived")
 
         # Assert
         # Should not try to archive existing Archived models
         mock_client.get_latest_versions.assert_not_called()
         mock_client.transition_model_version_stage.assert_called_once_with(
-            name="rossmann-ensemble", version="2", stage="Archived"
+            name="rossmann-model", version="2", stage="Archived"
         )
 
 
@@ -224,11 +167,11 @@ class TestGetModelVersion:
         mock_get_client.return_value = mock_client
 
         # Act
-        version = model_registry.get_model_version("rossmann-ensemble", stage="Production")
+        version = model_registry.get_model_version("rossmann-model", stage="Production")
 
         # Assert
         mock_client.get_latest_versions.assert_called_once_with(
-            "rossmann-ensemble", stages=["Production"]
+            "rossmann-model", stages=["Production"]
         )
         assert version == "5"
 
@@ -243,11 +186,11 @@ class TestGetModelVersion:
         mock_get_client.return_value = mock_client
 
         # Act
-        version = model_registry.get_model_version("rossmann-ensemble", stage="Staging")
+        version = model_registry.get_model_version("rossmann-model", stage="Staging")
 
         # Assert
         mock_client.get_latest_versions.assert_called_once_with(
-            "rossmann-ensemble", stages=["Staging"]
+            "rossmann-model", stages=["Staging"]
         )
         assert version == "7"
 
@@ -260,7 +203,7 @@ class TestGetModelVersion:
         mock_get_client.return_value = mock_client
 
         # Act
-        version = model_registry.get_model_version("rossmann-ensemble", stage="Production")
+        version = model_registry.get_model_version("rossmann-model", stage="Production")
 
         # Assert
         assert version is None
@@ -277,10 +220,10 @@ class TestLoadModel:
         mock_load_model.return_value = mock_model
 
         # Act
-        model = model_registry.load_model("rossmann-ensemble", stage="Production")
+        model = model_registry.load_model("rossmann-model", stage="Production")
 
         # Assert
-        mock_load_model.assert_called_once_with("models:/rossmann-ensemble/Production")
+        mock_load_model.assert_called_once_with("models:/rossmann-model/Production")
         assert model == mock_model
 
     @patch("src.models.model_registry.mlflow.pyfunc.load_model")
@@ -291,10 +234,10 @@ class TestLoadModel:
         mock_load_model.return_value = mock_model
 
         # Act
-        model = model_registry.load_model("rossmann-ensemble", stage="Staging")
+        model = model_registry.load_model("rossmann-model", stage="Staging")
 
         # Assert
-        mock_load_model.assert_called_once_with("models:/rossmann-ensemble/Staging")
+        mock_load_model.assert_called_once_with("models:/rossmann-model/Staging")
         assert model == mock_model
 
     @patch("src.models.model_registry.mlflow.pyfunc.load_model")
@@ -305,10 +248,10 @@ class TestLoadModel:
         mock_load_model.return_value = mock_model
 
         # Act
-        model = model_registry.load_model("rossmann-ensemble", stage="3")
+        model = model_registry.load_model("rossmann-model", stage="3")
 
         # Assert
-        mock_load_model.assert_called_once_with("models:/rossmann-ensemble/3")
+        mock_load_model.assert_called_once_with("models:/rossmann-model/3")
         assert model == mock_model
 
     @patch("src.models.model_registry.mlflow.pyfunc.load_model")
@@ -319,10 +262,10 @@ class TestLoadModel:
         mock_load_model.return_value = mock_model
 
         # Act
-        model = model_registry.load_model("rossmann-ensemble", stage="Archived")
+        model = model_registry.load_model("rossmann-model", stage="Archived")
 
         # Assert
-        mock_load_model.assert_called_once_with("models:/rossmann-ensemble/Archived")
+        mock_load_model.assert_called_once_with("models:/rossmann-model/Archived")
         assert model == mock_model
 
 
@@ -338,11 +281,11 @@ class TestGetModelInfo:
         mock_get_client.return_value = mock_client
 
         # Act
-        info = model_registry.get_model_info("rossmann-ensemble", version="1")
+        info = model_registry.get_model_info("rossmann-model", version="1")
 
         # Assert
-        mock_client.get_model_version.assert_called_once_with(name="rossmann-ensemble", version="1")
-        assert info["name"] == "rossmann-ensemble"
+        mock_client.get_model_version.assert_called_once_with(name="rossmann-model", version="1")
+        assert info["name"] == "rossmann-model"
         assert info["version"] == "1"
         assert info["current_stage"] == "Production"
         assert info["run_id"] == "test-run-id-123"
@@ -374,13 +317,13 @@ class TestGetModelInfo:
         mock_get_client.return_value = mock_client
 
         # Act
-        info = model_registry.get_model_info("rossmann-ensemble")
+        info = model_registry.get_model_info("rossmann-model")
 
         # Assert
-        mock_client.get_registered_model.assert_called_once_with("rossmann-ensemble")
-        mock_client.search_model_versions.assert_called_once_with("name='rossmann-ensemble'")
+        mock_client.get_registered_model.assert_called_once_with("rossmann-model")
+        mock_client.search_model_versions.assert_called_once_with("name='rossmann-model'")
 
-        assert info["name"] == "rossmann-ensemble"
+        assert info["name"] == "rossmann-model"
         assert len(info["versions"]) == 2
         assert info["versions"][0]["version"] == "1"
         assert info["versions"][0]["stage"] == "Archived"
@@ -398,13 +341,13 @@ class TestListRegisteredModels:
         mock_client = Mock()
 
         rm1 = Mock()
-        rm1.name = "rossmann-ensemble"
+        rm1.name = "rossmann-model"
 
         rm2 = Mock()
         rm2.name = "rossmann-baseline"
 
         rm3 = Mock()
-        rm3.name = "rossmann-xgboost"
+        rm3.name = "rossmann-experiment"
 
         mock_client.search_registered_models.return_value = [rm1, rm2, rm3]
         mock_get_client.return_value = mock_client
@@ -414,7 +357,7 @@ class TestListRegisteredModels:
 
         # Assert
         mock_client.search_registered_models.assert_called_once()
-        assert models == ["rossmann-ensemble", "rossmann-baseline", "rossmann-xgboost"]
+        assert models == ["rossmann-model", "rossmann-baseline", "rossmann-experiment"]
         assert len(models) == 3
 
     @patch("src.models.model_registry.get_mlflow_client")

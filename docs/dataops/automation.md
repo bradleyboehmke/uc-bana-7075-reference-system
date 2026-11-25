@@ -274,9 +274,9 @@ flowchart LR
 ### Steps
 
 1. **Load Features**: Read `data/processed/train_features.parquet`
-1. **Time-Series Split**: Create expanding window CV folds (respecting temporal order)
-1. **Train Models**: LightGBM, XGBoost, CatBoost with hyperparameter tuning
-1. **Evaluate**: Calculate RMSPE on validation folds
+1. **Time-Series Split**: Hold out the last 6 weeks (respecting temporal order)
+1. **Train Model**: One LightGBM model with fixed hyperparameters
+1. **Evaluate**: Calculate RMSPE on the holdout
 1. **Compare**: Check if new model beats current production model
 1. **Deploy**: If better, deploy new model; otherwise, keep current
 

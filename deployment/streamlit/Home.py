@@ -56,13 +56,11 @@ st.markdown(
 )
 
 # Introduction
-st.markdown(
-    """
+st.markdown("""
     Welcome to the **Rossmann Sales Forecasting Dashboard**! This application provides a comprehensive
     interface for generating sales predictions, monitoring model performance, and managing the ML model
     lifecycle.
-    """
-)
+    """)
 
 st.divider()
 
@@ -183,8 +181,7 @@ st.subheader("✨ Dashboard Features")
 feature_col1, feature_col2 = st.columns(2)
 
 with feature_col1:
-    st.markdown(
-        """
+    st.markdown("""
         ### 📈 Predictions
         - **Single Prediction**: Real-time forecasts for one store/date
         - **Batch Upload**: Upload CSV with just 6 fields (DayOfWeek auto-calculated!)
@@ -192,12 +189,10 @@ with feature_col1:
         - Automatic feature engineering via FastAPI
         - Download results as CSV with predictions
         - Store-level summaries and analytics
-        """
-    )
+        """)
 
 with feature_col2:
-    st.markdown(
-        """
+    st.markdown("""
         ### 🚀 Easy to Use
         - Simple train.csv format (no feature engineering needed!)
         - Template CSV download for batch predictions
@@ -210,37 +205,32 @@ with feature_col2:
         - Model architecture overview
         - Feature engineering pipeline details
         - Deployment and integration guides
-        """
-    )
+        """)
 
 st.divider()
 
 # Quick Start Guide
 st.subheader("🚀 Quick Start")
 
-st.markdown(
-    """
+st.markdown("""
     1. **Start FastAPI Server**: Run `cd deployment/api && python main.py` (if not already running)
     2. **Single Prediction**: Navigate to *Predictions* → *Single Prediction* tab for real-time forecasts
     3. **Batch Upload**: Use *Predictions* → *Batch Upload* tab to process multiple predictions from CSV
     4. **Download Template**: Get the CSV template to see the exact format required (6 fields)
     5. **View Documentation**: Check *Documentation* page for API examples and integration guides
-    """
-)
+    """)
 
 # System Information
 with st.expander("ℹ️ System Information"):
-    st.markdown(
-        """
-        **Model Architecture**: Weighted ensemble of LightGBM (30%), XGBoost (60%), and CatBoost (10%)
+    st.markdown("""
+        **Model**: One LightGBM model with fixed hyperparameters
 
-        **Target Metric**: RMSPE (Root Mean Square Percentage Error) < 0.10
+        **Target Metric**: RMSPE (Root Mean Square Percentage Error) at or below 0.20 to be promoted
 
-        **Features**: 20+ engineered features including calendar, promotion, competition, and lag features
+        **Features**: 12 features in four groups: when (day, week, month, year), store (type, assortment, competition distance), promotions, and holidays
 
-        **Data**: Historical sales data from 1,115 Rossmann stores across Europe
-        """
-    )
+        **Data**: Historical daily sales for 100 of Rossmann's 1,115 stores
+        """)
 
 # Footer
 st.divider()

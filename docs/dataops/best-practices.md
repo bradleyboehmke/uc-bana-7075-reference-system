@@ -249,7 +249,7 @@ ______________________________________________________________________
 - Automated, tested, always created
 - Required for all models
 - Thoroughly validated
-- Examples: lags, rolling stats, calendar features
+- Examples: calendar features, promotion flags
 
 ### ModelOps (Experimental Features)
 
@@ -281,18 +281,10 @@ def test_merge_preserves_all_sales_records():
     assert len(processed) == len(raw_train), \
         "Merge dropped sales records!"
 
-def test_no_future_leakage_in_lags():
-    """Ensure lag features don't use future information."""
-    df = build_features()
-
-    # For each store, lag_1 should equal previous day's sales
-    for store_id in df["Store"].unique():
-        store_df = df[df["Store"] == store_id].sort_values("Date")
-        store_df["expected_lag_1"] = store_df["Sales"].shift(1)
-
-        # Allow NaN for first row
-        assert store_df["lag_sales_1"].equals(store_df["expected_lag_1"]), \
-            f"Lag feature has data leakage for store {store_id}"
+def test_no_sales_history_features():
+    """Model features must be known in advance, never derived from Sales."""
+    for feature in get_model_features():
+        assert "Sales" not in feature and "Customers" not in feature
 
 def test_validation_catches_bad_data():
     """Ensure validation fails on known-bad data."""
@@ -333,21 +325,15 @@ def acf(d):
 ### Configuration Over Code
 
 ```yaml
-# config/features.yaml (Good!)
-calendar_features:
-  - year
-  - month
-  - quarter
-  - day_of_week
-
-lag_features:
-  lags: [1, 7, 14, 28]
-  groupby: Store
-
-rolling_features:
-  windows: [7, 14, 28, 60]
-  functions: [mean, std]
-  groupby: Store
+# config/params.yaml (Good!)
+features:
+  model_features:
+    - DayOfWeek
+    - Month
+    - Week
+    - Year
+    - StoreType
+    # ...
 ```
 
 ______________________________________________________________________
@@ -403,15 +389,9 @@ cat great_expectations/uncommitted/validations/latest.json
 
 ### Issue: Feature engineering creates NaN values
 
-**Cause:** Lag features create NaN for first N rows per store
+**Cause:** Usually a failed merge (a store missing from `store.csv`) or a new column with missing values.
 
-**Solution:**
-
-This is expected behavior. Handle in modeling:
-
-- Drop rows with NaN lags, OR
-- Impute with 0 or forward-fill, OR
-- Use models that handle missing values (LightGBM, XGBoost)
+**Solution:** Check the merge keys and the cleaning step's fill rules in `src/data/make_dataset.py`. The features validation stage reports which columns contain nulls.
 
 ### Issue: DVC push fails
 

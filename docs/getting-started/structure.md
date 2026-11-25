@@ -52,8 +52,7 @@ rossmann-forecasting/
 │   │   ├── overview.md
 │   │   ├── tracking.md
 │   │   ├── training.md
-│   │   ├── registry.md
-│   │   └── tuning.md
+│   │   └── registry.md
 │   ├── deployment/
 │   │   ├── overview.md
 │   │   ├── fastapi.md
@@ -95,43 +94,16 @@ rossmann-forecasting/
 ├── mlruns/                     # MLflow tracking data (NOT in git)
 │   └── 0/
 │       └── <experiment-runs>/
-├── models/                     # Saved model artifacts (DVC tracked)
-│   ├── baseline/
-│   │   ├── naive_model.pkl
-│   │   └── lgbm_baseline.pkl
-│   ├── advanced/
-│   │   ├── lgbm_tuned.pkl
-│   │   ├── xgboost_tuned.pkl
-│   │   └── catboost_tuned.pkl
-│   ├── ensembles/
-│   │   ├── weighted_blend.pkl
-│   │   └── stacked_ensemble.pkl
-│   └── final/
-│       └── production_model.pkl
 ├── monitoring/                 # Monitoring outputs (NOT in git)
 │   ├── drift_reports/
 │   │   └── <timestamp>_drift_report.html
 │   └── performance_reports/
 │       └── <timestamp>_performance.json
 ├── notebooks/                  # Jupyter notebooks for exploration
-│   ├── 01-eda-and-cleaning.ipynb
-│   ├── 02-feature-engineering.ipynb
-│   ├── 03-baseline-models.ipynb
-│   ├── 04-advanced-models-and-ensembles.ipynb
-│   └── 05-final-eval-and-test-simulation.ipynb
+│   └── 01-eda-and-cleaning.ipynb
 ├── outputs/                    # Model outputs and artifacts
-│   ├── predictions/
-│   │   ├── baseline_predictions.csv
-│   │   ├── ensemble_predictions.csv
-│   │   └── final_test_predictions.csv
-│   ├── metrics/
-│   │   ├── cv_results.json
-│   │   ├── model_comparison.json
-│   │   └── final_metrics.json
-│   └── visualizations/
-│       ├── feature_importance.png
-│       ├── cv_performance.png
-│       └── predictions_vs_actual.png
+│   └── predictions/
+│       └── production_predictions.csv
 ├── scripts/                    # Automation scripts
 │   ├── dataops_workflow.sh     # Complete DataOps workflow
 │   ├── train_all_models.sh     # Train all model variants
@@ -147,12 +119,13 @@ rossmann-forecasting/
 │   │   └── build_features.py   # Feature engineering pipeline
 │   ├── models/
 │   │   ├── __init__.py
-│   │   ├── train_baselines.py  # Baseline model training
-│   │   ├── train_advanced.py   # Advanced model training
-│   │   └── ensembles.py        # Ensemble methods
+│   │   ├── train.py           # Train, evaluate, log, register
+│   │   ├── model_registry.py  # MLflow registry helpers
+│   │   ├── validate_model.py  # Threshold check and promotion
+│   │   ├── predict.py         # Batch predictions
+│   │   └── explain.py         # SHAP values
 │   ├── evaluation/
 │   │   ├── __init__.py
-│   │   ├── cv.py               # Time-series cross-validation
 │   │   └── metrics.py          # RMSPE and other metrics
 │   ├── monitoring/
 │   │   ├── __init__.py
@@ -200,24 +173,23 @@ ______________________________________________________________________
 
 **Feature engineering**
 
-- **`build_features.py`**: Creates calendar, promo, competition, lag, and rolling features
-    - Time-series safe (no data leakage)
-    - Store-level grouping for lags/rolling
+- **`build_features.py`**: Creates Year, Month, Week, and Promo2Active; the model's 12 features are listed in `config/params.yaml`
+    - Every feature is known in advance (none uses past sales)
     - Output: `train_features.parquet`
 
 ### `src/models/`
 
 **Model training**
 
-- **`train_baselines.py`**: Naive and simple LightGBM baselines
-- **`train_advanced.py`**: Tuned LightGBM, XGBoost, CatBoost with hyperparameter optimization
-- **`ensembles.py`**: Weighted blending and stacking ensembles
+- **`train.py`**: One LightGBM model with fixed hyperparameters; logs to MLflow and registers `rossmann-model`
+- **`validate_model.py`**: Promotes a version to Staging if holdout RMSPE passes `validation.max_rmspe`
+- **`predict.py`**: Batch predictions with a model loaded by stage
+- **`explain.py`**: SHAP values for individual predictions
 
 ### `src/evaluation/`
 
 **Model evaluation**
 
-- **`cv.py`**: Time-series cross-validation with expanding windows
 - **`metrics.py`**: RMSPE calculation and other metrics
 
 ### `src/monitoring/`
@@ -270,8 +242,6 @@ Defines the complete data pipeline with dependencies and outputs. Enables reprod
 1. `validate_processed_data` - Validate cleaning
 1. `build_features` - Feature engineering
 1. `validate_features` - Validate features
-1. `train_baselines` - Train baseline models
-1. `train_advanced` - Train tuned models
 
 ### `pyproject.toml`
 
@@ -284,7 +254,7 @@ Modern Python packaging standard (PEP 621). Defines:
 
 **Dependency groups:**
 
-- **Production**: numpy, pandas, scikit-learn, lightgbm, xgboost, catboost
+- **Production**: numpy, pandas, scikit-learn, lightgbm, mlflow
 - **Dev**: pytest, black, ruff, mypy, pre-commit
 - **Docs**: mkdocs, mkdocs-material, mkdocstrings
 

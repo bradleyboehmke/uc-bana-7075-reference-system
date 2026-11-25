@@ -18,11 +18,7 @@ dependencies = [
     "scipy>=1.11.0",
 
     # ML frameworks
-    "xgboost>=2.0.0",
     "lightgbm>=4.0.0",
-    "catboost>=1.2.0",
-    "optuna>=3.3.0",
-    "optuna-integration[mlflow]>=4.0.0",
 
     # MLOps - Experiment tracking
     "mlflow>=2.8.0",
@@ -197,8 +193,6 @@ strict_equality = true
 [[tool.mypy.overrides]]
 module = [
     "lightgbm.*",
-    "xgboost.*",
-    "catboost.*",
     "mlflow.*",
     "great_expectations.*",
     "evidently.*",

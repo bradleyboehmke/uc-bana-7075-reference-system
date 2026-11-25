@@ -5,19 +5,19 @@ it passes all checks.
 """
 
 import logging
-from typing import Optional
 
 import numpy as np
 import pandas as pd
-from evaluation.cv import remove_missing_features
-from evaluation.metrics import rmspe
-from utils.io import read_parquet
 
+from evaluation.metrics import rmspe
+from features.build_features import get_model_features
 from models.model_registry import (
     get_model_version,
     load_model,
     promote_model,
 )
+from models.train import prepare_features, split_holdout
+from utils.io import load_params, read_parquet
 
 logger = logging.getLogger(__name__)
 
@@ -42,27 +42,12 @@ def load_holdout_data(
     """
     logger.info(f"Loading holdout data from: {data_path}")
     df = read_parquet(data_path)
+    _, holdout_df = split_holdout(df, holdout_days)
+    X_holdout, y = prepare_features(holdout_df)
+    y_holdout = y.values
+    feature_cols = get_model_features()
 
-    # Create holdout split
-    max_date = df["Date"].max()
-    holdout_start = max_date - pd.Timedelta(days=holdout_days - 1)
-    holdout_df = df[df["Date"] >= holdout_start].copy()
-
-    # Filter to open stores
-    holdout_data = holdout_df[holdout_df["Open"] == 1].copy()
-
-    # Define features
-    exclude_cols = ["Sales", "Date", "Store", "Customers"]
-    feature_cols = [col for col in df.columns if col not in exclude_cols]
-
-    # Remove missing features
-    holdout_data, _ = remove_missing_features(holdout_data, feature_cols)
-
-    X_holdout = holdout_data[feature_cols]
-    y_holdout = holdout_data["Sales"].values
-
-    logger.info(f"Holdout data: {len(holdout_data):,} rows (open stores)")
-    logger.info(f"Date range: {holdout_data['Date'].min()} to {holdout_data['Date'].max()}")
+    logger.info(f"Holdout data: {len(X_holdout):,} rows (open stores)")
 
     return X_holdout, y_holdout, feature_cols
 
@@ -106,8 +91,7 @@ def evaluate_model(model, X_test: pd.DataFrame, y_test: np.ndarray) -> dict[str,
 
 def check_performance_threshold(
     metrics: dict[str, float],
-    threshold_rmspe: float = 0.10,
-    strict: bool = False,
+    threshold_rmspe: float | None = None,
 ) -> bool:
     """Check if model meets performance thresholds.
 
@@ -115,18 +99,16 @@ def check_performance_threshold(
     ----------
     metrics : dict
         Model evaluation metrics
-    threshold_rmspe : float, default=0.10
-        Maximum acceptable RMSPE (10% error threshold)
-    strict : bool, default=False
-        If True, use stricter threshold (0.09856 - top 50 leaderboard)
+    threshold_rmspe : float, optional
+        Maximum acceptable RMSPE. Defaults to ``validation.max_rmspe`` in config/params.yaml.
 
     Returns
     -------
     bool
         True if model passes threshold checks
     """
-    if strict:
-        threshold_rmspe = 0.09856  # Top 50 Kaggle leaderboard
+    if threshold_rmspe is None:
+        threshold_rmspe = load_params()["validation"]["max_rmspe"]
 
     logger.info("=" * 70)
     logger.info("PERFORMANCE THRESHOLD CHECKS")
@@ -158,11 +140,10 @@ def check_performance_threshold(
 
 
 def validate_and_promote(
-    model_name: str = "rossmann-ensemble",
-    version: Optional[str] = None,
+    model_name: str | None = None,
+    version: str | None = None,
     data_path: str = "data/processed/train_features.parquet",
-    threshold_rmspe: float = 0.10,
-    strict: bool = False,
+    threshold_rmspe: float | None = None,
     auto_promote: bool = True,
 ) -> dict[str, any]:
     """Validate a model and promote to Staging if passing.
@@ -175,10 +156,8 @@ def validate_and_promote(
         Model version to validate. If None, uses latest version
     data_path : str
         Path to processed data
-    threshold_rmspe : float
-        Performance threshold
-    strict : bool
-        Use strict threshold (0.09856)
+    threshold_rmspe : float, optional
+        Maximum acceptable RMSPE. Defaults to ``validation.max_rmspe`` in config/params.yaml.
     auto_promote : bool
         Automatically promote to Staging if passing
 
@@ -187,6 +166,7 @@ def validate_and_promote(
     dict
         Validation results including metrics and promotion status
     """
+    model_name = model_name or load_params()["mlflow"]["model_name"]
     logger.info("=" * 70)
     logger.info("MODEL VALIDATION & PROMOTION")
     logger.info("=" * 70)
@@ -219,7 +199,9 @@ def validate_and_promote(
 
     # Check thresholds
     logger.info("\nChecking performance thresholds...")
-    passed = check_performance_threshold(metrics, threshold_rmspe, strict)
+    if threshold_rmspe is None:
+        threshold_rmspe = load_params()["validation"]["max_rmspe"]
+    passed = check_performance_threshold(metrics, threshold_rmspe)
 
     # Promotion decision
     promoted = False
@@ -237,7 +219,7 @@ def validate_and_promote(
         "model_name": model_name,
         "version": version,
         "metrics": metrics,
-        "threshold_rmspe": threshold_rmspe if not strict else 0.09856,
+        "threshold_rmspe": threshold_rmspe,
         "passed": passed,
         "promoted": promoted,
         "stage": "Staging" if promoted else "None",
@@ -256,8 +238,8 @@ def validate_and_promote(
 
 
 def promote_to_production(
-    model_name: str = "rossmann-ensemble",
-    version: Optional[str] = None,
+    model_name: str | None = None,
+    version: str | None = None,
 ) -> None:
     """Promote a Staging model to Production.
 
@@ -270,6 +252,7 @@ def promote_to_production(
     version : str, optional
         Model version to promote. If None, uses current Staging version
     """
+    model_name = model_name or load_params()["mlflow"]["model_name"]
     logger.info("=" * 70)
     logger.info("PROMOTE TO PRODUCTION")
     logger.info("=" * 70)
@@ -294,19 +277,16 @@ def main():
     """Main validation workflow."""
     import argparse
 
-    parser = argparse.ArgumentParser(description="Validate and promote Rossmann ensemble model")
-    parser.add_argument("--model-name", default="rossmann-ensemble", help="Model name in registry")
+    parser = argparse.ArgumentParser(description="Validate and promote the Rossmann model")
+    parser.add_argument(
+        "--model-name", default=None, help="Model name in registry (default: from config)"
+    )
     parser.add_argument("--version", type=str, help="Model version to validate")
     parser.add_argument(
         "--threshold",
         type=float,
-        default=0.10,
-        help="RMSPE threshold (default: 0.10)",
-    )
-    parser.add_argument(
-        "--strict",
-        action="store_true",
-        help="Use strict threshold (0.09856 - top 50)",
+        default=None,
+        help="RMSPE threshold (default: validation.max_rmspe in config/params.yaml)",
     )
     parser.add_argument(
         "--no-auto-promote",
@@ -333,7 +313,6 @@ def main():
             model_name=args.model_name,
             version=args.version,
             threshold_rmspe=args.threshold,
-            strict=args.strict,
             auto_promote=not args.no_auto_promote,
         )
 
@@ -364,8 +343,7 @@ def main():
             print("\n✗ Model did not pass validation")
             print("\nConsider:")
             print("  - Retraining with more data")
-            print("  - Tuning hyperparameters further")
-            print("  - Adjusting ensemble weights")
+            print("  - Revisiting the features or hyperparameters in config/params.yaml")
 
 
 if __name__ == "__main__":

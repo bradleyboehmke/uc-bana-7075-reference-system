@@ -37,31 +37,21 @@ class TestLoadHoldoutData:
         assert "Customers" not in feature_cols
 
     def test_load_holdout_data_correct_date_range(self, sample_features_data, tmp_path):
-        """Test that holdout period extracts the last N days."""
-        # Arrange
+        """The holdout is the open-store rows in the last N days."""
         data_path = tmp_path / "test_features.parquet"
         sample_features_data.to_parquet(data_path)
         holdout_days = 14
 
-        # Calculate expected date range
-        max_date = sample_features_data["Date"].max()
-        expected_start = max_date - pd.Timedelta(days=holdout_days - 1)
+        X_holdout, y_holdout, _ = validate_model.load_holdout_data(
+            str(data_path), holdout_days=holdout_days
+        )
 
-        # Act
-        with patch("evaluation.cv.remove_missing_features") as mock_remove:
-            # Mock remove_missing_features to return the data as-is
-            mock_remove.side_effect = lambda df, cols: (df, None)
-
-            # Need to call the actual function to test date filtering
-
-            # Manually replicate the function logic to verify
-            df = pd.read_parquet(data_path)
-            holdout_start = df["Date"].max() - pd.Timedelta(days=holdout_days - 1)
-            holdout_df = df[df["Date"] >= holdout_start]
-
-            # Assert date range
-            assert holdout_df["Date"].min() >= expected_start
-            assert holdout_df["Date"].max() == max_date
+        start = sample_features_data["Date"].max() - pd.Timedelta(days=holdout_days - 1)
+        expected = sample_features_data[
+            (sample_features_data["Date"] >= start) & (sample_features_data["Open"] == 1)
+        ]
+        assert len(X_holdout) == len(expected)
+        assert len(y_holdout) == len(expected)
 
     def test_load_holdout_data_filters_closed_stores(self, sample_features_data, tmp_path):
         """Test that only open stores are included in holdout data."""
@@ -207,38 +197,6 @@ class TestCheckPerformanceThreshold:
         # Assert
         assert result is False
 
-    def test_check_threshold_strict_mode(self):
-        """Test strict mode with top 50 threshold (0.09856)."""
-        # Arrange
-        metrics = {
-            "rmspe": 0.098,  # Would pass standard, but fail strict
-            "rmse": 500.0,
-            "mae": 400.0,
-            "mape": 5.0,
-        }
-
-        # Act
-        result = validate_model.check_performance_threshold(metrics, strict=True)
-
-        # Assert
-        assert result is True  # 0.098 < 0.09856
-
-    def test_check_threshold_strict_mode_fail(self):
-        """Test strict mode failure."""
-        # Arrange
-        metrics = {
-            "rmspe": 0.099,  # Above strict threshold
-            "rmse": 500.0,
-            "mae": 400.0,
-            "mape": 5.0,
-        }
-
-        # Act
-        result = validate_model.check_performance_threshold(metrics, strict=True)
-
-        # Assert
-        assert result is False  # 0.099 > 0.09856
-
     def test_check_threshold_exact_boundary(self):
         """Test exact boundary case."""
         # Arrange
@@ -290,13 +248,13 @@ class TestValidateAndPromote:
 
         # Act
         results = validate_model.validate_and_promote(
-            model_name="rossmann-ensemble",
+            model_name="rossmann-model",
             version="3",
             auto_promote=True,
         )
 
         # Assert
-        mock_promote.assert_called_once_with("rossmann-ensemble", version="3", stage="Staging")
+        mock_promote.assert_called_once_with("rossmann-model", version="3", stage="Staging")
         assert results["passed"] is True
         assert results["promoted"] is True
         assert results["stage"] == "Staging"
@@ -332,7 +290,7 @@ class TestValidateAndPromote:
 
         # Act
         results = validate_model.validate_and_promote(
-            model_name="rossmann-ensemble",
+            model_name="rossmann-model",
             version="3",
             auto_promote=False,
         )
@@ -374,7 +332,7 @@ class TestValidateAndPromote:
 
         # Act
         results = validate_model.validate_and_promote(
-            model_name="rossmann-ensemble",
+            model_name="rossmann-model",
             version="3",
             auto_promote=True,
         )
@@ -428,7 +386,7 @@ class TestValidateAndPromote:
 
         # Act
         results = validate_model.validate_and_promote(
-            model_name="rossmann-ensemble",
+            model_name="rossmann-model",
             version=None,  # No version specified
             auto_promote=False,
         )
@@ -449,12 +407,12 @@ class TestPromoteToProduction:
         # Arrange - no setup needed
 
         # Act
-        validate_model.promote_to_production(model_name="rossmann-ensemble", version="7")
+        validate_model.promote_to_production(model_name="rossmann-model", version="7")
 
         # Assert
         mock_get_version.assert_not_called()  # Should not query for version
         mock_promote_model.assert_called_once_with(
-            "rossmann-ensemble", version="7", stage="Production"
+            "rossmann-model", version="7", stage="Production"
         )
 
     @patch("src.models.validate_model.promote_model")
@@ -467,12 +425,12 @@ class TestPromoteToProduction:
         mock_get_version.return_value = "5"
 
         # Act
-        validate_model.promote_to_production(model_name="rossmann-ensemble", version=None)
+        validate_model.promote_to_production(model_name="rossmann-model", version=None)
 
         # Assert
-        mock_get_version.assert_called_once_with("rossmann-ensemble", stage="Staging")
+        mock_get_version.assert_called_once_with("rossmann-model", stage="Staging")
         mock_promote_model.assert_called_once_with(
-            "rossmann-ensemble", version="5", stage="Production"
+            "rossmann-model", version="5", stage="Production"
         )
 
     @patch("src.models.validate_model.get_model_version")
@@ -483,7 +441,7 @@ class TestPromoteToProduction:
 
         # Act & Assert
         with pytest.raises(ValueError, match="No Staging version found"):
-            validate_model.promote_to_production(model_name="rossmann-ensemble", version=None)
+            validate_model.promote_to_production(model_name="rossmann-model", version=None)
 
 
 class TestValidationIntegration:
@@ -509,7 +467,7 @@ class TestValidationIntegration:
 
         # Act
         results = validate_model.validate_and_promote(
-            model_name="rossmann-ensemble",
+            model_name="rossmann-model",
             version="1",
             threshold_rmspe=0.10,
             auto_promote=True,

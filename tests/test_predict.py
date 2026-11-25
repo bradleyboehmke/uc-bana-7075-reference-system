@@ -60,25 +60,6 @@ class TestLoadInferenceData:
         # All loaded rows should have Open=1
         assert all(data_df["Open"] == 1)
 
-    def test_load_inference_data_drops_missing_features(self, sample_features_data, tmp_path):
-        """Test that rows with missing features are dropped."""
-        # Arrange
-        data_path = tmp_path / "test_features.parquet"
-
-        # Add some NaN values to feature columns
-        df_with_nans = sample_features_data.copy()
-        df_with_nans.loc[0, "Year"] = np.nan
-
-        df_with_nans.to_parquet(data_path)
-
-        # Act
-        data_df, X_features, feature_cols = predict.load_inference_data(str(data_path))
-
-        # Assert
-        # Should have dropped the row with NaN
-        assert len(data_df) < len(df_with_nans[df_with_nans["Open"] == 1])
-        assert not X_features.isna().any().any()
-
 
 class TestGeneratePredictions:
     """Tests for generate_predictions()."""
@@ -195,7 +176,7 @@ class TestSavePredictions:
             predictions_df,
             str(output_path),
             model_version="7",
-            metadata={"model_name": "rossmann-ensemble"},
+            metadata={"model_name": "rossmann-model"},
         )
 
         # Assert
@@ -208,7 +189,7 @@ class TestSavePredictions:
             metadata = json.load(f)
 
         assert metadata["model_version"] == "7"
-        assert metadata["model_name"] == "rossmann-ensemble"
+        assert metadata["model_name"] == "rossmann-model"
         assert metadata["n_predictions"] == 3
         assert "date_range" in metadata
         assert "prediction_date" in metadata
@@ -274,15 +255,15 @@ class TestPredict:
 
         # Act
         result = predict.predict(
-            model_name="rossmann-ensemble",
+            model_name="rossmann-model",
             stage="Production",
             data_path="data/processed/train_features.parquet",
             output_path="outputs/predictions/test.csv",
         )
 
         # Assert
-        mock_get_version.assert_called_once_with("rossmann-ensemble", stage="Production")
-        mock_load_model.assert_called_once_with("rossmann-ensemble", stage="Production")
+        mock_get_version.assert_called_once_with("rossmann-model", stage="Production")
+        mock_load_model.assert_called_once_with("rossmann-model", stage="Production")
         mock_load_data.assert_called_once()
         mock_generate_preds.assert_called_once_with(mock_model, X_features, data_df)
         mock_save_preds.assert_called_once()
@@ -328,8 +309,8 @@ class TestPredict:
         predict.predict(stage="Staging")
 
         # Assert
-        mock_get_version.assert_called_once_with("rossmann-ensemble", stage="Staging")
-        mock_load_model.assert_called_once_with("rossmann-ensemble", stage="Staging")
+        mock_get_version.assert_called_once_with("rossmann-model", stage="Staging")
+        mock_load_model.assert_called_once_with("rossmann-model", stage="Staging")
 
     @patch("src.models.predict.save_predictions")
     @patch("src.models.predict.generate_predictions")
@@ -368,7 +349,7 @@ class TestPredict:
         predict.predict(stage="3")  # Use version number directly
 
         # Assert
-        mock_load_model.assert_called_once_with("rossmann-ensemble", stage="3")
+        mock_load_model.assert_called_once_with("rossmann-model", stage="3")
 
     @patch("src.models.predict.save_predictions")
     @patch("src.models.predict.generate_predictions")

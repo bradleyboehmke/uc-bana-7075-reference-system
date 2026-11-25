@@ -29,12 +29,20 @@ mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
 
 # Import prediction logger
 from prediction_logger import PredictionLogger
-from utils.io import read_csv
 
-from data.prepare_predictions import prepare_prediction_data, validate_input_data
+from data.prepare_predictions import (
+    build_prediction_features,
+    get_known_stores,
+    select_model_features,
+    validate_input_data,
+)
 from models.model_registry import get_model_version, list_registered_models, load_model
+from utils.io import load_params, read_csv
 
 logger = logging.getLogger(__name__)
+
+# Registered model name (config/params.yaml: mlflow.model_name)
+MODEL_NAME = load_params()["mlflow"]["model_name"]
 
 # Global model cache
 _model_cache = {"model": None, "version": None, "stage": None, "loaded_at": None}
@@ -48,7 +56,7 @@ _prediction_logger = None
 # Initialize FastAPI app
 app = FastAPI(
     title="Rossmann Sales Forecasting API",
-    description="Production API for predicting daily sales across 3,000+ European stores using ensemble ML models",
+    description="API for predicting daily sales for Rossmann stores with a LightGBM model",
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
@@ -104,7 +112,9 @@ class PredictionInput(BaseModel):
     4. Make predictions
     """
 
-    Store: int = Field(..., ge=1, description="Store ID (1-1115)")
+    Store: int = Field(
+        ..., ge=1, description="Store ID (must be one of the stores in data/raw/store.csv)"
+    )
     DayOfWeek: int = Field(..., ge=1, le=7, description="Day of week (1=Monday, 7=Sunday)")
     Date: str = Field(..., description="Date in YYYY-MM-DD format")
     Open: int = Field(..., ge=0, le=1, description="Is store open? (0=closed, 1=open)")
@@ -147,14 +157,14 @@ def get_or_load_model(stage: str = "Production"):
 
     # Get the current version for this stage
     if stage in ["Production", "Staging"]:
-        current_version = str(get_model_version("rossmann-ensemble", stage=stage))
+        current_version = str(get_model_version(MODEL_NAME, stage=stage))
     else:
         current_version = stage
 
     # Check if we need to reload
     if _model_cache["model"] is None or _model_cache["version"] != current_version:
         logger.info(f"Loading model version {current_version} from stage {stage}")
-        model = load_model("rossmann-ensemble", stage=stage)
+        model = load_model(MODEL_NAME, stage=stage)
         _model_cache = {
             "model": model,
             "version": current_version,
@@ -201,15 +211,15 @@ async def startup_event():
     try:
         models = list_registered_models()
         logger.info(f"Registered models: {models}")
-        if "rossmann-ensemble" in models:
-            prod_version = get_model_version("rossmann-ensemble", "Production")
-            staging_version = get_model_version("rossmann-ensemble", "Staging")
+        if MODEL_NAME in models:
+            prod_version = get_model_version(MODEL_NAME, "Production")
+            staging_version = get_model_version(MODEL_NAME, "Staging")
             logger.info(f"Production version: {prod_version}")
             logger.info(f"Staging version: {staging_version}")
     except Exception as e:
         logger.warning(f"Could not load model info: {e}")
 
-    logger.info("Target: RMSPE < 0.09856 (Top 50 Kaggle leaderboard)")
+    logger.info(f"Promotion threshold: RMSPE <= {load_params()['validation']['max_rmspe']}")
     logger.info("=" * 70)
 
 
@@ -220,9 +230,9 @@ async def root():
     return {
         "name": "Rossmann Sales Forecasting API",
         "version": "1.0.0",
-        "description": "Production API for predicting daily sales across 3,000+ European stores",
-        "model": "Ensemble (LightGBM + XGBoost + CatBoost)",
-        "target_metric": "RMSPE < 0.09856",
+        "description": "Predicts daily sales for the Rossmann stores in data/raw/store.csv",
+        "model": f"LightGBM ({MODEL_NAME})",
+        "target_metric": f"RMSPE <= {load_params()['validation']['max_rmspe']}",
         "endpoints": {
             "health": "/health",
             "model_info": "/model/info",
@@ -264,13 +274,13 @@ async def get_model_info():
         prod_version = None
         staging_version = None
 
-        if "rossmann-ensemble" in models:
+        if MODEL_NAME in models:
             try:
-                prod_version = str(get_model_version("rossmann-ensemble", "Production"))
+                prod_version = str(get_model_version(MODEL_NAME, "Production"))
             except Exception:
                 pass
             try:
-                staging_version = str(get_model_version("rossmann-ensemble", "Staging"))
+                staging_version = str(get_model_version(MODEL_NAME, "Staging"))
             except Exception:
                 pass
 
@@ -356,35 +366,18 @@ async def predict(request: PredictionRequest):
         raw_df = pd.DataFrame(input_dicts)
 
         # Step 2: Validate input data
-        is_valid, errors = validate_input_data(raw_df)
+        known_stores = get_known_stores(_store_metadata) if _store_metadata is not None else None
+        is_valid, errors = validate_input_data(raw_df, known_stores=known_stores)
         if not is_valid:
             raise HTTPException(status_code=422, detail=f"Input validation failed: {errors}")
 
         logger.info("✓ Input data validated successfully")
 
-        # Step 3: Prepare prediction features using unified pipeline
-        # This handles: merging store metadata, cleaning, feature engineering, and column selection
-        # Note: We need to get the full feature set BEFORE column selection for logging
-        from features.build_features import build_all_features
-
-        from data.make_dataset import basic_cleaning, merge_store_info
-
-        # Create a copy with dummy Sales/Customers for full feature generation
-        raw_df_with_dummy = raw_df.copy()
-        if "Sales" not in raw_df_with_dummy.columns:
-            raw_df_with_dummy["Sales"] = 0
-        if "Customers" not in raw_df_with_dummy.columns:
-            raw_df_with_dummy["Customers"] = 0
-
-        # Merge and clean data
-        merged_df = merge_store_info(raw_df_with_dummy, _store_metadata)
-        cleaned_df = basic_cleaning(merged_df)
-
-        # Engineer features (get FULL feature set for logging)
-        full_features = build_all_features(cleaned_df)
-
-        # Select model features (subset for prediction)
-        model_input = prepare_prediction_data(raw_df, store_metadata=_store_metadata)
+        # Step 3: Build features with the same functions training uses.
+        # full_features keeps every column for prediction logging; model_input is the
+        # 12 model features.
+        full_features = build_prediction_features(raw_df, store_metadata=_store_metadata)
+        model_input = select_model_features(full_features)
 
         logger.info(
             f"✓ Features prepared: {len(model_input)} samples, {model_input.shape[1]} features"

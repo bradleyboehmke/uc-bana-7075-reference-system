@@ -2,142 +2,63 @@
 
 ## What is ModelOps?
 
-ModelOps (Model Operations) is the practice of managing the complete machine learning model lifecycle, from experimentation to production deployment and monitoring. This project implements ModelOps using MLflow for tracking, versioning, and deployment.
+ModelOps (Model Operations) is the practice of managing a machine learning model's lifecycle: training it reproducibly, versioning it, deciding when it is good enough to serve, and replacing it safely. This project uses MLflow for tracking and versioning.
 
 ## Key Components
 
-### 1. Experimentation (Notebooks)
+### 1. Training (`src/models/train.py`)
 
-**Purpose:** Explore different models and find optimal hyperparameters
+One LightGBM model with fixed hyperparameters from `config/params.yaml`, trained on 12 features. See [Model Training](training.md).
 
-The project uses Jupyter notebooks (`notebooks/03-baseline-models.ipynb` and `notebooks/04-advanced-models-and-ensembles.ipynb`) for interactive model experimentation:
-
-- **Baseline models:** Simple models (naive, basic LightGBM) to establish performance benchmarks
-- **Hyperparameter tuning:** Optuna trials across LightGBM, XGBoost, and CatBoost to find best parameters
-- **Ensemble development:** Weighted combination of top models for improved performance
-- **MLflow tracking:** All experiments automatically logged with hyperparameters, metrics (RMSPE), and artifacts
-
-**Output:** Best hyperparameters saved to `config/best_hyperparameters.json` for production use
+- Loads `data/processed/train_features.parquet`
+- Holds out the last 6 weeks for evaluation
+- Logs parameters, metrics, and the data version to MLflow
+- Registers the model as `rossmann-model`
 
 ### 2. Model Registry (MLflow)
 
-**Purpose:** Centralized model versioning and lifecycle management
+Centralized model versioning with stage-based promotion:
 
-After training, models are registered in MLflow Model Registry with automated stage-based promotion:
+- **Registration:** each training run registers a new version
+- **Staging:** a version is promoted to Staging after passing the RMSPE threshold (`validation.max_rmspe`)
+- **Production:** a person promotes Staging to Production (human-in-the-loop safety)
+- **Archival:** the previous Production version is archived automatically
+- **Lineage:** each version links to its training run, parameters, and data version
 
-- **Registration:** Trained ensemble models automatically registered with version numbers
-- **Staging validation:** New models promoted to "Staging" after passing RMSPE threshold (\< 0.10)
-- **Production promotion:** Manual approval moves "Staging" → "Production" (human-in-the-loop safety)
-- **Archival:** Previous "Production" models automatically archived when new version promoted
-- **Lineage tracking:** Each model version linked to data version (DVC) and training parameters
+### 3. Production code (`src/models/`)
 
-**Stages:** None (newly registered) → Staging (validated) → Production (approved) → Archived (replaced)
+- **`train.py`:** trains, evaluates, logs, and registers the model
+- **`validate_model.py`:** scores a registered version on the holdout and promotes it to Staging if it passes
+- **`predict.py`:** loads a model by stage and generates batch predictions
+- **`model_registry.py`:** helpers to register, promote, load, and describe models
+- **`explain.py`:** SHAP values for individual predictions (code only)
 
-### 3. Production Code (`src/models/`)
+### 4. Automated retraining (`scripts/retrain_pipeline.sh`)
 
-**Purpose:** Reproducible, automated model training and deployment
-
-Production-ready Python modules that use best hyperparameters from experimentation:
-
-- **`train_ensemble.py`:** Automated training pipeline using `config/best_hyperparameters.json`
-    - Loads most recently processed features from `data/processed/train_features.parquet`
-    - Trains LightGBM, XGBoost, CatBoost with optimal hyperparameters
-    - Creates weighted ensemble (30% LightGBM, 60% XGBoost, 10% CatBoost)
-    - Registers model to MLflow Registry
-- **`validate_model.py`:** Automated validation and promotion
-    - Loads latest model from Registry
-    - Validates performance on holdout data
-    - Auto-promotes to "Staging" if RMSPE \< threshold
-- **`predict.py`:** Production inference pipeline
-    - Loads model from Registry by stage (Staging/Production)
-    - Generates predictions for new data
-    - Logs predictions for monitoring
-- **`ensemble.py`:** Custom MLflow PyFunc wrapper for ensemble deployment
-- **`model_registry.py`:** Utility functions for Registry operations (load, promote, version info)
-
-### 4. Automated Retraining (`scripts/retrain_pipeline.sh`)
-
-**Purpose:** Scheduled model updates as new data arrives
-
-End-to-end orchestrated workflow for production retraining:
-
-1. **Data validation:** Validate new raw data with Great Expectations
-1. **Feature engineering:** Process new data through feature pipeline
-1. **Model training:** Train ensemble using `train_ensemble.py` with best hyperparameters
-1. **Automated validation:** Run `validate_model.py` to check performance and promote to Staging
-1. **Manual review:** Human reviews Staging model in MLflow UI before Production promotion
-1. **Inference testing:** Test Production model on sample data to ensure it works
-
-**Trigger:** Can be scheduled (cron, Airflow) or run manually when new data arrives
+1. Validate new raw data with Great Expectations
+2. Build features
+3. Train with `python -m src.models.train`
+4. Validate and promote to Staging with `validate_model.py`
+5. A person reviews Staging in the MLflow UI before promoting to Production
+6. Optionally test inference with the Production model
 
 ## Quick Start
 
-### Launch MLflow UI
-
 ```bash
-mlflow ui
-```
+# Train and register (a few seconds)
+python -m src.models.train
 
-Open browser to http://localhost:5000 to view experiments and model registry
-
-### Option A: Experiment and Tune (Full Workflow)
-
-**Use this approach to:**
-
-- Explore different model architectures
-- Run your own hyperparameter tuning trials
-- Generate custom `best_hyperparameters.json` based on your data
-
-```bash
-# 1. Run experimentation notebooks in order
-jupyter lab
-
-# Open and execute:
-# - notebooks/03-baseline-models.ipynb (benchmarks)
-# - notebooks/04-advanced-models-and-ensembles.ipynb (Optuna tuning)
-# - notebooks/05-final-eval-and-test-simulation.ipynb (save best params & register final model)
-```
-
-**Output:** Best hyperparameters saved to `config/best_hyperparameters.json`
-
-**Then:** Proceed to "Train Production Model" below
-
-### Option B: Use Pre-Tuned Model (Fast Path)
-
-**Use this approach to:**
-
-- Skip experimentation and use pre-tuned hyperparameters
-- Quickly train production model with optimal settings
-- Reproduce results from notebook experiments
-
-The repository includes `config/best_hyperparameters.json` with hyperparameters already tuned via Optuna (100+ trials per model). This allows you to train the production model immediately without running notebooks.
-
-### Train Production Model
-
-```bash
-# Uses hyperparameters from config/best_hyperparameters.json
-python src/models/train_ensemble.py
-```
-
-### Validate and Promote
-
-```bash
-# Automatically promotes to "Staging" if RMSPE < 0.10
+# Promote to Staging if RMSPE <= validation.max_rmspe
 python src/models/validate_model.py
-```
 
-### Run Inference
+# Promote Staging to Production
+python src/models/validate_model.py --promote-to-production
 
-```bash
-# Load model from "Production" stage and generate predictions
+# Batch predictions with the Production model
 python src/models/predict.py --stage Production
-```
 
-### Automated Retraining Pipeline
-
-```bash
-# Complete workflow: data validation → training → validation → inference test
-bash scripts/retrain_pipeline.sh
+# Browse runs and the registry
+mlflow ui   # http://localhost:5000
 ```
 
 ## Model Lifecycle
@@ -154,23 +75,11 @@ graph LR
     F --> G[Archived]
 ```
 
-**Stage Definitions:**
-
-- **Registered:** Newly trained model registered in MLflow, awaiting validation
-- **Staging:** Model passed automated validation (RMSPE \< 0.10), ready for manual review
-- **Production:** Approved model actively serving predictions
-- **Archived:** Previous production model, replaced by newer version
-
 ## Documentation Structure
 
-- **Overview** (this page) - Quick introduction to ModelOps
+- **Overview** (this page)
 - **[Experiment Tracking](tracking.md)** - MLflow tracking guide
-- **[Model Training](training.md)** - Production training pipeline
+- **[Model Training](training.md)** - The model, its features, and the training pipeline
 - **[Model Registry](registry.md)** - Model versioning and lifecycle
-- **[Hyperparameter Tuning](tuning.md)** - Optuna optimization guide
 
-## Next Steps
-
-- Explore the individual ModelOps documentation pages linked above
-- Explore individual components in the navigation menu
-- See [DataOps Documentation](../dataops/overview.md) for data pipeline information
+See [DataOps Documentation](../dataops/overview.md) for the data pipeline.

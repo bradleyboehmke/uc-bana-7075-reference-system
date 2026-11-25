@@ -51,7 +51,7 @@ track_model_performance(
     actuals=daily_sales,
     model_version="v2.3",
     metadata={
-        "num_stores": 1115,
+        "num_stores": 100,
         "num_predictions": 7805
     }
 )

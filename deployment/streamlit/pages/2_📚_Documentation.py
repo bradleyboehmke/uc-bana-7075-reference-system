@@ -171,13 +171,9 @@ with tab2:
 
     st.markdown(
         """
-        The Rossmann forecasting system uses a weighted ensemble of three gradient boosting models:
-
-        - **LightGBM** (30% weight)
-        - **XGBoost** (60% weight)
-        - **CatBoost** (10% weight)
-
-        This ensemble approach combines the strengths of each algorithm to achieve robust predictions.
+        The Rossmann forecasting system uses **one LightGBM model** (gradient-boosted
+        decision trees) with fixed hyperparameters from `config/params.yaml`. Keeping the
+        model simple keeps the focus on the system around it.
         """
     )
 
@@ -186,20 +182,15 @@ with tab2:
         """
 1. Data Loading
    ↓
-2. Feature Engineering (20+ features)
+2. Feature Engineering (12 features)
    ↓
-3. Train/Holdout Split (time-based)
+3. Train/Holdout Split (last 6 weeks held out)
    ↓
-4. Individual Model Training
-   ├─ LightGBM with categorical features
-   ├─ XGBoost with encoded features
-   └─ CatBoost with native categorical handling
+4. LightGBM Training (fixed hyperparameters)
    ↓
-5. Ensemble Creation (weighted average)
+5. Model Registration to MLflow
    ↓
-6. Model Registration to MLflow
-   ↓
-7. Validation & Promotion
+6. Validation & Promotion
         """,
         language="text",
     )
@@ -209,13 +200,13 @@ with tab2:
         """
         **Primary Metric**: RMSPE (Root Mean Square Percentage Error)
 
-        - **Target**: RMSPE < 0.10 (10% error)
-        - **Top 50 Leaderboard**: RMSPE < 0.09856
+        - **Promotion threshold**: RMSPE at or below 0.20 (`validation.max_rmspe`)
+        - **Current model**: about 0.16 on the 6-week holdout
 
         **Validation Strategy**:
         - Time-based train/holdout split (6-week holdout)
         - No data leakage from future to past
-        - Store-level lag and rolling features
+        - No features computed from past sales, so serving matches training
         """
     )
 
@@ -224,7 +215,7 @@ with tab3:
 
     st.markdown(
         """
-        The model uses 20+ engineered features across multiple categories:
+        The model uses 12 features in four groups (listed in `config/params.yaml`):
         """
     )
 
@@ -233,35 +224,28 @@ with tab3:
     with feature_col1:
         st.markdown(
             """
-            **Calendar Features**
-            - Year, Month, Week, Day
+            **When**
             - DayOfWeek (1=Monday, 7=Sunday)
-            - IsMonthStart, IsMonthEnd
-            - Quarter, Season
+            - Month
+            - Week (of year)
+            - Year
 
-            **Promotion Features**
-            - Promo (daily promotion)
-            - Promo2 (long-term promotion)
-            - Promo2SinceWeek, Promo2SinceYear
-            - PromoInterval (months when Promo2 restarts)
-            - Promo active this month flag
+            **Promotions**
+            - Promo (promotion that day)
+            - Promo2 (store is in the ongoing coupon program)
+            - Promo2Active (coupon program running this month)
             """
         )
 
     with feature_col2:
         st.markdown(
             """
-            **Competition Features**
-            - CompetitionDistance (meters)
-            - CompetitionOpenSinceMonth, CompetitionOpenSinceYear
-            - Competition age (derived)
-
-            **Store Features**
+            **Store**
             - StoreType (a, b, c, d)
             - Assortment (a, b, c)
-            - Open (0=closed, 1=open)
+            - CompetitionDistance (meters to nearest competitor)
 
-            **Holiday Features**
+            **Holidays**
             - StateHoliday (0, a, b, c)
             - SchoolHoliday (0, 1)
             """
@@ -276,7 +260,7 @@ with tab3:
 
         | Feature | Type | Range | Description |
         |---------|------|-------|-------------|
-        | Store | int | 1-1115 | Unique store identifier |
+        | Store | int | 100 store IDs | One of the stores in data/raw/store.csv |
         | DayOfWeek | int | 1-7 | Day of week (1=Monday) |
         | Open | int | 0-1 | Store open flag |
         | Promo | int | 0-1 | Daily promotion active |
@@ -399,7 +383,6 @@ with resource_col1:
         **Documentation**
         - [Model Training Guide](../docs/modelops/training.md)
         - [Model Registry Guide](../docs/modelops/registry.md)
-        - [Hyperparameter Tuning](../docs/modelops/tuning.md)
         - [Validation Workflow](../docs/modelops/validation.md)
         """
     )

@@ -25,8 +25,7 @@ stages:
       - data/processed/train_clean.parquet
     params:
       - config/params.yaml:
-          - features.lags
-          - features.rolling_windows
+          - features.model_features
 
   validate_features:
     cmd: python src/data/validate_data.py --stage features
@@ -36,8 +35,8 @@ stages:
 
   # Model training stages (commented out - models tracked separately)
   # Uncomment when ready to integrate model training into pipeline
-  # train_baseline:
-  #   cmd: python -m src.models.train_baselines
+  # train:
+  #   cmd: python -m src.models.train
   #   deps:
-  #     - src/models/train_baselines.py
+  #     - src/models/train.py
   #     - data/processed/train_features.parquet

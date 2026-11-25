@@ -124,3 +124,27 @@ def ensure_dir(dirpath: Union[str, Path]) -> Path:
     path = Path(dirpath)
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def load_params(config_path: Union[str, Path, None] = None) -> dict:
+    """Load the project configuration from config/params.yaml.
+
+    Parameters
+    ----------
+    config_path : str or Path, optional
+        Path to the YAML file. Defaults to config/params.yaml at the project root,
+        so it works no matter which directory a script runs from.
+
+    Returns
+    -------
+    dict
+        Parsed configuration
+    """
+    import yaml
+
+    path = Path(config_path) if config_path else PROJECT_ROOT / "config" / "params.yaml"
+    with open(path) as f:
+        return yaml.safe_load(f)

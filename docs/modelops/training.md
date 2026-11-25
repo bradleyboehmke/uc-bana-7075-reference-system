@@ -1,130 +1,117 @@
 # Model Training
 
-## From Experimentation to Production
-
-Once experimentation identifies the optimal model architecture and hyperparameters, the next step is creating production-ready training code. While Jupyter notebooks are excellent for exploration and iteration, production systems require:
-
-- **Reproducibility**: Consistent results across runs without manual intervention
-- **Automation**: Ability to retrain models on schedule or when new data arrives
-- **Versioning**: Automatic tracking of model lineage and data dependencies
-- **Validation**: Built-in checks to ensure model quality before deployment
-
-The production training pipeline transforms the best practices discovered in notebooks into automated, monitored workflows that can be scheduled, triggered by data updates, or integrated into CI/CD systems.
-
-## Production Training Pipeline
-
-The `src/models/train_ensemble.py` module provides automated training using the best hyperparameters discovered during experimentation:
+The system trains **one LightGBM model with fixed hyperparameters**. There is no ensemble and no hyperparameter search: the subject of this system is everything around the model, so the model is kept as simple as it can be while still forecasting well.
 
 ```bash
-python src/models/train_ensemble.py
+python -m src.models.train
 ```
 
-This script loads hyperparameters from `config/best_hyperparameters.json`, trains the ensemble model, and registers it to MLflow Model Registry—all without manual intervention.
+Training finishes in a few seconds on a laptop.
 
-## Training Workflow
+## The features
 
-The production training pipeline follows a structured workflow to ensure reproducibility and traceability:
+The model uses 12 features, all known in advance for any future date. None of them is computed from past sales, so the API builds exactly the same features from a request that training builds from history.
+
+```mermaid
+graph LR
+    subgraph When
+        DayOfWeek
+        Month
+        Week["Week (of year)"]
+        Year
+    end
+    subgraph Store
+        StoreType
+        Assortment
+        CompetitionDistance
+    end
+    subgraph Promotions
+        Promo
+        Promo2
+        Promo2Active
+    end
+    subgraph Holidays
+        StateHoliday
+        SchoolHoliday
+    end
+    When --> M[LightGBM model]
+    Store --> M
+    Promotions --> M
+    Holidays --> M
+    M --> S[Predicted daily sales]
+```
+
+| Group | Feature | Why it matters |
+|---|---|---|
+| When | `DayOfWeek` | Shoppers buy more on some weekdays than others |
+| | `Month` | Seasonal demand, such as December holiday shopping |
+| | `Week` | Holiday run-ups like Easter that move between months |
+| | `Year` | Overall growth or decline from year to year |
+| Store | `StoreType` | Store format (a–d) sets the baseline sales level |
+| | `Assortment` | Wider product ranges draw bigger baskets |
+| | `CompetitionDistance` | A nearby competitor takes customers |
+| Promotions | `Promo` | A promotion that day lifts sales |
+| | `Promo2` | The store takes part in the ongoing coupon program |
+| | `Promo2Active` | The coupon program is running this month |
+| Holidays | `StateHoliday` | Public holidays close stores or change shopping |
+| | `SchoolHoliday` | Families shop differently when schools are out |
+
+The list lives in `config/params.yaml` under `features.model_features`. Training, validation, batch prediction, and the API all read it from there.
+
+## Training workflow
 
 ```mermaid
 graph TD
-    A[Start Training] --> B[Load Processed Features]
-    B --> C[Load Best Hyperparameters]
-    C --> D[Train LightGBM]
-    C --> E[Train XGBoost]
-    C --> F[Train CatBoost]
-
-    D --> G[Create Weighted Ensemble]
-    E --> G
-    F --> G
-
-    G --> H[Log to MLflow]
-    H --> I[Register to Model Registry]
-    I --> J[Training Complete]
-
-    B -.-> K[data/processed/train_features.parquet]
-    C -.-> L[config/best_hyperparameters.json]
-    H -.-> M[Parameters, Metrics, Artifacts]
-    I -.-> N[MLflow Model Registry]
-
-    style A fill:#e1f5ff
-    style J fill:#e8f5e9
-    style K fill:#fff4e6
-    style L fill:#fff4e6
-    style M fill:#f3e5f5
-    style N fill:#f3e5f5
+    A[data/processed/train_features.parquet] --> B[Hold out the last 6 weeks]
+    B --> C[Train LightGBM on the earlier data]
+    P[config/params.yaml<br/>model.lightgbm] --> C
+    C --> D[Score RMSPE, RMSE, MAE on the holdout]
+    D --> E[Log to MLflow]
+    E --> F[Register as rossmann-model]
 ```
 
-### Pipeline Steps
+1. **Load features** from `data/processed/train_features.parquet`, produced by `python -m src.features.build_features`.
+2. **Split** off the last 42 days (`training.holdout_days`) as a holdout that simulates the next six weeks.
+3. **Train** on open-store days only (closed stores sell nothing), using the fixed hyperparameters in `model.lightgbm`.
+4. **Evaluate** on the holdout. RMSPE (root mean squared percentage error) is the main metric.
+5. **Log** the hyperparameters, feature list, row counts, metrics, training time, and data version to MLflow.
+6. **Register** the model in the MLflow Model Registry under `mlflow.model_name` (`rossmann-model`).
 
-**1. Load Processed Features**
+## Hyperparameters
 
-Reads the most recently processed features from `data/processed/train_features.parquet`. This parquet file contains all engineered features (calendar, lag, rolling, promotion, competition) ready for model training.
+```yaml
+model:
+  lightgbm:
+    objective: regression
+    num_leaves: 31
+    learning_rate: 0.05
+    num_boost_round: 500
+    seed: 7075
+    num_threads: 2
+    verbose: -1
+```
 
-**2. Load Best Hyperparameters**
+These values are fixed on purpose. Changing one is a deliberate experiment: edit `config/params.yaml`, retrain, and compare the runs in MLflow.
 
-Loads optimal hyperparameters from `config/best_hyperparameters.json`, which were identified through Optuna optimization in notebook 04. This ensures the production model uses the same configuration that achieved the best validation performance.
-
-**3. Train Individual Models**
-
-Trains three gradient boosting models in parallel using the loaded hyperparameters:
-
-- **LightGBM**: Fast training with excellent performance on tabular data
-- **XGBoost**: Robust model with strong regularization capabilities
-- **CatBoost**: Specialized handling of categorical features
-
-Each model is trained using 5-fold time-series cross-validation to ensure robust performance estimates.
-
-**4. Create Weighted Ensemble**
-
-Combines the three models using predetermined weights (30% LightGBM, 60% XGBoost, 10% CatBoost) to leverage the strengths of each algorithm. The ensemble is wrapped in a custom MLflow PyFunc for seamless deployment.
-
-**5. Log to MLflow**
-
-Records all training metadata to MLflow:
-
-- **Parameters**: Hyperparameters for each model and ensemble weights
-- **Metrics**: Cross-validation RMSPE scores and training duration
-- **Artifacts**: Trained model files, conda environment specification
-- **Tags**: Data version (DVC hash), training timestamp, model family
-
-**6. Register to Model Registry**
-
-Automatically registers the trained ensemble to MLflow Model Registry with version number and metadata. The model starts in the "None" stage, awaiting validation before promotion to "Staging."
-
-## Running the Pipeline
-
-To train a production model using the best hyperparameters from experimentation:
+## After training
 
 ```bash
-# Train ensemble with best hyperparameters
-python src/models/train_ensemble.py
+# Check the new version against the RMSPE threshold and promote it to Staging
+python src/models/validate_model.py
+
+# Promote the Staging version to Production
+python src/models/validate_model.py --promote-to-production
 ```
 
-The script will:
+The threshold is `validation.max_rmspe` in `config/params.yaml`.
 
-1. Validate that required files exist (`train_features.parquet`, `best_hyperparameters.json`)
-1. Train all three models with optimal hyperparameters
-1. Create and register the ensemble to MLflow
-1. Output the registered model version number
+## Explaining predictions (SHAP)
 
-**Expected output:**
+`src/models/explain.py` computes SHAP values: how much each feature pushed a single prediction up or down from the average.
 
+```python
+from models.explain import compute_shap_values
+
+shap_df = compute_shap_values(model, X.head(5))
+# One column per feature plus base_value; each row sums to the prediction
 ```
-Loading features from data/processed/train_features.parquet...
-Loading hyperparameters from config/best_hyperparameters.json...
-Training LightGBM... (1.2 minutes)
-Training XGBoost... (2.3 minutes)
-Training CatBoost... (1.8 minutes)
-Creating ensemble (weights: LightGBM=0.30, XGBoost=0.60, CatBoost=0.10)...
-Registering model to MLflow Model Registry...
-✓ Model registered as version 7
-```
-
-## Next Steps
-
-After training:
-
-1. **Validate**: Run `python src/models/validate_model.py`
-1. **Review**: Check MLflow UI for metrics
-1. **Promote**: Move to Staging if validation passes
-1. **Test**: Run inference with Staging model

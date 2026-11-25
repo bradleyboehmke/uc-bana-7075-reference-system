@@ -129,13 +129,12 @@ ______________________________________________________________________
 
 **Purpose:** Create **proven, standard features** that are always useful for Rossmann forecasting models. These are features that have been validated across multiple modeling efforts and should be consistently available.
 
-**Standard features include:**
+**Created features:**
 
-- **Calendar features**: Year, month, quarter, season, weekend flags
-- **Promotion features**: Promo2 active status, duration, intervals
-- **Competition features**: Log-scaled distance, age, presence flags
-- **Lag features**: Sales from 1, 7, 14, 28 days ago (per store)
-- **Rolling features**: 7/14/28/60-day rolling means and standard deviations (per store)
+- **Calendar features**: Year, Month, Week (of year)
+- **Promotion features**: Promo2Active (the store's coupon program runs this month)
+
+The model uses 12 features in total (listed in `config/params.yaml`); the other eight come straight from the raw data. None is computed from past sales, so the API can build them for any future date.
 
 **Why This Matters:** Separating standard features (DataOps) from experimental features (ModelOps) creates a clear boundary:
 
@@ -153,20 +152,17 @@ python -m src.features.build_features
 ### What It Does
 
 1. Loads `data/processed/train_clean.parquet`
-1. Adds calendar features (12 features)
-1. Adds promotion features (5 features)
-1. Adds competition features (3 features)
-1. Adds lag features (4 features, grouped by store)
-1. Adds rolling features (8 features, grouped by store)
+1. Adds calendar features (Year, Month, Week)
+1. Adds the promotion feature Promo2Active
 1. Saves to `data/processed/train_features.parquet`
 
 ### Output File
 
-`data/processed/train_features.parquet` (~50 MB, 32 new features)
+`data/processed/train_features.parquet` (4 new columns)
 
 ### Critical Detail
 
-Lag and rolling features **must** use `groupby('Store')` to prevent data leakage across stores. This is tested in `tests/test_features.py`.
+Features must be known before the day being predicted. A feature computed from that day's sales would leak the answer into the model; `tests/test_features.py` checks that no model feature is derived from Sales or Customers.
 
 ______________________________________________________________________
 
@@ -174,11 +170,11 @@ ______________________________________________________________________
 
 **Purpose:** Ensure feature engineering didn't introduce bugs, nulls, or invalid values.
 
-**Why This Matters:** Feature engineering involves complex transformations (lags, rolling windows, date parsing). Validation catches errors like:
+**Why This Matters:** Feature engineering transforms data (date parsing, merges, derived flags). Validation catches errors like:
 
-- Infinite values from log transformations
-- NaN propagation from rolling windows
-- Incorrect groupby logic (leakage across stores)
+- Missing columns after a code change
+- Null values from a failed merge
+- Out-of-range values (for example, a month of 13)
 
 ### Run This Step
 
@@ -280,7 +276,7 @@ flowchart TB
 
     subgraph Step4["📍 Step 4: Build Features"]
         direction LR
-        F1[🐍 build_features.py<br/>lags + rolling + calendar]
+        F1[🐍 build_features.py<br/>calendar + promo]
         OUT2[📁 data/processed/<br/>train_features.parquet]
         F1 --> OUT2
     end

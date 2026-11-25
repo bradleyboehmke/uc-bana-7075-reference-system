@@ -114,15 +114,11 @@ ______________________________________________________________________
 ### Commands
 
 ```bash
-# Option A: Jupyter Notebooks (exploration)
-jupyter lab
-# Navigate to: notebooks/03-baseline-models.ipynb
-#              notebooks/04-advanced-models-and-ensembles.ipynb
+# Train one LightGBM model, log it to MLflow, and register it
+python -m src.models.train
 
-# Option B: Python Scripts (production)
-python -m src.models.train_baselines
-python -m src.models.train_advanced
-python -m src.models.ensembles
+# Promote to Staging if it passes the RMSPE threshold
+python src/models/validate_model.py
 
 # View experiments in MLflow
 mlflow ui
@@ -307,14 +303,14 @@ bash scripts/dataops_workflow.sh
 ### 3. ModelOps (30 minutes)
 
 ```bash
-# Train models with MLflow tracking
-python -m src.models.train_baselines
-python -m src.models.train_advanced
+# Train and register the model with MLflow tracking
+python -m src.models.train
 
 # View experiments
 mlflow ui
 
-# Register best model (via MLflow UI or programmatically)
+# Validate and promote
+python src/models/validate_model.py
 ```
 
 ### 4. Deployment (5 minutes)
@@ -379,8 +375,8 @@ ______________________________________________________________________
 | Task                        | Command                                    |
 | --------------------------- | ------------------------------------------ |
 | **Run DataOps pipeline**    | `bash scripts/dataops_workflow.sh`         |
-| **Train baseline models**   | `python -m src.models.train_baselines`     |
-| **Train advanced models**   | `python -m src.models.train_advanced`      |
+| **Train the model**         | `python -m src.models.train`               |
+| **Validate and promote**    | `python src/models/validate_model.py`      |
 | **View MLflow experiments** | `mlflow ui` (http://localhost:5000)        |
 | **Deploy all services**     | `docker-compose up --build`                |
 | **Generate drift report**   | `python -m src.monitoring.drift_detection` |

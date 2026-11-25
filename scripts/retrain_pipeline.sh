@@ -10,10 +10,9 @@
 # 4. (Optional) Inference testing
 #
 # Usage:
-#   bash scripts/retrain_pipeline.sh [--strict] [--no-validate] [--test-inference]
+#   bash scripts/retrain_pipeline.sh [--no-validate] [--test-inference]
 #
 # Options:
-#   --strict          Use strict validation threshold (RMSPE < 0.09856)
 #   --no-validate     Skip model validation step
 #   --test-inference  Run inference test after validation
 ################################################################################
@@ -28,16 +27,11 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Parse arguments
-STRICT_MODE=false
 SKIP_VALIDATION=false
 TEST_INFERENCE=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --strict)
-            STRICT_MODE=true
-            shift
-            ;;
         --no-validate)
             SKIP_VALIDATION=true
             shift
@@ -75,7 +69,6 @@ echo -e "${BLUE}ROSSMANN MODEL RETRAINING PIPELINE${NC}"
 echo -e "${BLUE}======================================================================${NC}"
 echo -e "Started at: $(date)"
 echo -e "Project root: $PROJECT_ROOT"
-echo -e "Strict mode: $STRICT_MODE"
 echo -e "Skip validation: $SKIP_VALIDATION"
 echo -e "Test inference: $TEST_INFERENCE"
 echo -e "${BLUE}======================================================================${NC}"
@@ -114,16 +107,8 @@ fi
 echo -e "\n${BLUE}[Step 2/4] Model Training${NC}"
 echo -e "${BLUE}----------------------------------------------------------------------${NC}"
 
-# Check if best hyperparameters exist
-if [ ! -f "config/best_hyperparameters.json" ]; then
-    echo -e "${RED}Error: Best hyperparameters not found${NC}"
-    echo -e "${YELLOW}Please run hyperparameter tuning first:${NC}"
-    echo -e "  python notebooks/04-advanced-models-and-ensembles.ipynb"
-    exit 1
-fi
-
-echo -e "Training ensemble model..."
-python src/models/train_ensemble.py || {
+echo -e "Training LightGBM model (fixed hyperparameters from config/params.yaml)..."
+python -m src.models.train || {
     echo -e "${RED}Error: Model training failed${NC}"
     exit 1
 }
@@ -141,21 +126,15 @@ if [ "$SKIP_VALIDATION" = false ]; then
     # Build validation command
     VALIDATE_CMD="python src/models/validate_model.py"
 
-    if [ "$STRICT_MODE" = true ]; then
-        VALIDATE_CMD="$VALIDATE_CMD --strict"
-        echo -e "Using strict validation (RMSPE < 0.09856)"
-    else
-        echo -e "Using standard validation (RMSPE < 0.10)"
-    fi
+    echo -e "Using the RMSPE threshold in config/params.yaml (validation.max_rmspe)"
 
     # Run validation
     $VALIDATE_CMD || {
         echo -e "${RED}Error: Model validation failed${NC}"
         echo -e "${YELLOW}Model was trained but did not pass validation${NC}"
         echo -e "${YELLOW}Review metrics and consider:${NC}"
-        echo -e "  - Retraining with adjusted hyperparameters"
-        echo -e "  - Collecting more training data"
-        echo -e "  - Adjusting ensemble weights"
+        echo -e "  - Checking the new data for quality problems"
+        echo -e "  - Revisiting the features or hyperparameters in config/params.yaml"
         exit 1
     }
 
